@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { CompareResult, WorkbookData } from '@shared/types'
+import type { CompareResult, DocContent, WorkbookData } from '@shared/types'
 import { buildIndex, type MappingIndex } from '@shared/core/mapping'
 
 interface SessionState {
@@ -17,6 +17,8 @@ interface SessionState {
   selectedCell: { text: string; sheet: string; ref: string } | null
   /** DiffList 点击行 → 网格跳转目标 */
   gridFocus: { sheet: string; row: number } | null
+  /** 当前加载的口径文档 */
+  docContent: DocContent | null
   /** 右侧标签页：result | grid | mapping | doc */
   uiTab: string
 }
@@ -35,6 +37,7 @@ export const useSessionStore = defineStore('session', {
     mappingCount: 0,
     selectedCell: null,
     gridFocus: null,
+    docContent: null,
     uiTab: 'result'
   }),
 

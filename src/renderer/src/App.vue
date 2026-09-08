@@ -5,6 +5,7 @@ import FilePanel from './components/FilePanel.vue'
 import DiffList from './components/DiffList.vue'
 import SheetGrid from './components/SheetGrid.vue'
 import MappingPanel from './components/MappingPanel.vue'
+import DocViewer from './components/DocViewer.vue'
 
 const session = useSessionStore()
 
@@ -40,6 +41,9 @@ const summary = computed(() => {
           </el-tab-pane>
           <el-tab-pane label="口径查询" name="mapping">
             <MappingPanel />
+          </el-tab-pane>
+          <el-tab-pane label="口径文档" name="doc">
+            <DocViewer />
           </el-tab-pane>
         </el-tabs>
       </el-main>
