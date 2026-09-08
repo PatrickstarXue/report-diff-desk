@@ -1,10 +1,11 @@
-// 生成演示样例：samples/上期.xlsx 与 samples/本期.xlsx
-// 覆盖：增长、下降、恰好 ±50%、从零新增、移除行、新增行、文本、公式、日期、新增列
+// 生成演示样例：samples/上期.xlsx 与 samples/本期.xlsx、上期包.zip 与 本期包.zip
+// 覆盖：增长、下降、恰好 ±50%、从零新增、移除行、新增行、文本、公式、日期、新增列、zip 顺序配对
 // 运行：npm run make:samples
 import { mkdirSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import * as XLSX from 'xlsx'
+import JSZip from 'jszip'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const outDir = join(__dirname, '..', 'samples')
@@ -79,12 +80,48 @@ XLSX.utils.book_append_sheet(
   '口径'
 )
 
+// zip 样例：模拟「NR 报表包」场景——按压缩包内顺序配对（NR01 对 NR01、NR02 对 NR02）
+const zipBase = new JSZip()
+const zipCurr = new JSZip()
+function makeZipEntryBuf(rows) {
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '经营数据')
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+}
+// NR01：含 2 处变动（营收 100→200、费用 0→50）
+zipBase.file(
+  'NR01_月_本外币_境内汇总数据_20260731.xlsx',
+  makeZipEntryBuf([['指标', '金额'], ['营收', 100], ['费用', 0], ['利润', 40]])
+)
+zipCurr.file(
+  'NR01_1910_月_本外币_境内汇总数据_20260831.xlsx',
+  makeZipEntryBuf([['指标', '金额'], ['营收', 200], ['费用', 50], ['利润', 40]])
+)
+// NR02：无变动
+zipBase.file(
+  'NR02_月_本外币_境内汇总数据_20260731.xlsx',
+  makeZipEntryBuf([['指标', '金额'], ['存量', 1000]])
+)
+zipCurr.file(
+  'NR02_1910_月_本外币_境内汇总数据_20260831.xlsx',
+  makeZipEntryBuf([['指标', '金额'], ['存量', 1000]])
+)
+// 上期包多一个文件：验证「未参与比对」提示
+zipBase.file(
+  'NR03_月_本外币_境内汇总数据_20260731.xlsx',
+  makeZipEntryBuf([['指标', '金额'], ['备用', 1]])
+)
+
 // SheetJS ESM 版无 fs 集成，write 成 buffer 后手动写盘
 writeFileSync(join(outDir, '上期.xlsx'), XLSX.write(base, { type: 'buffer', bookType: 'xlsx' }))
 writeFileSync(join(outDir, '本期.xlsx'), XLSX.write(curr, { type: 'buffer', bookType: 'xlsx' }))
 writeFileSync(join(outDir, '口径映射表.xlsx'), XLSX.write(mapping, { type: 'buffer', bookType: 'xlsx' }))
+writeFileSync(join(outDir, '上期包.zip'), await zipBase.generateAsync({ type: 'nodebuffer' }))
+writeFileSync(join(outDir, '本期包.zip'), await zipCurr.generateAsync({ type: 'nodebuffer' }))
 console.log('样例已生成：')
 console.log(' ', join(outDir, '上期.xlsx'))
 console.log(' ', join(outDir, '本期.xlsx'))
 console.log(' ', join(outDir, '口径映射表.xlsx'))
-console.log('预期比对结果：6 处变动（营收增长、费用从零、移除指标、新增指标、千分位增长、多一列新增）')
+console.log(' ', join(outDir, '上期包.zip'))
+console.log(' ', join(outDir, '本期包.zip'))
+console.log('预期：单文件比对 6 处变动；zip 比对 2 对配对 + 上期 1 个未参与（NR03），NR01 对 2 处变动、NR02 对 0 处')
