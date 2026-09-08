@@ -6,62 +6,93 @@ import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
 const sheetFilter = ref('')
+/** null = 全部文件对 */
+const pairFilter = ref<number | null>(null)
 
-const sheetOptions = computed(() => session.compareResult?.sheetsMatched ?? [])
+interface DiffRow {
+  pairIndex: number
+  pairLabel: string
+  diff: CellDiff
+}
 
-const diffs = computed<CellDiff[]>(() => {
-  const all = session.compareResult?.diffs ?? []
-  if (!sheetFilter.value) return all
-  return all.filter((d) => d.sheet === sheetFilter.value)
-})
+const pairOptions = computed(() =>
+  (session.compareResult?.pairs ?? []).map((p, i) => ({ index: i, label: p.pairLabel }))
+)
+
+const sheetOptions = computed(() => session.compareResult?.pairs[pairFilter.value ?? 0]?.compare.sheetsMatched ?? [])
+
+/** 当前显示的文件对列表（真实索引） */
+const visiblePairs = computed(() =>
+  session.compareResult?.pairs
+    .map((p, index) => ({ p, index }))
+    .filter(({ index }) => pairFilter.value === null || index === pairFilter.value) ?? []
+)
+
+const showFileCol = computed(() => pairFilter.value === null && visiblePairs.value.length > 1)
+
+const rows = computed<DiffRow[]>(() =>
+  visiblePairs.value.flatMap(({ p, index }) =>
+    p.compare.diffs
+      .filter((d) => !sheetFilter.value || d.sheet === sheetFilter.value)
+      .map((diff) => ({ pairIndex: index, pairLabel: p.pairLabel, diff }))
+  )
+)
 
 function rateText(d: CellDiff): string {
   if (d.changeRate === null) return '-'
   return `${(d.changeRate * 100).toFixed(1)}%`
 }
 
-function rowClass({ row }: { row: CellDiff }): string {
-  return `diff-${row.kind}`
+function rowClass({ row }: { row: DiffRow }): string {
+  return `diff-${row.diff.kind}`
 }
 
 function valueText(v: CellDiff['prevValue']): string {
   return v === null || v === '' ? '（空）' : String(v)
 }
 
-function onRowClick(row: CellDiff): void {
-  session.focusCell(row.sheet, row.row)
+function onRowClick(row: DiffRow): void {
+  session.focusCell(row.pairIndex, row.diff.sheet, row.diff.row)
 }
 </script>
 
 <template>
   <div class="diff-list">
     <div class="diff-toolbar">
-      <el-select v-model="sheetFilter" size="small" placeholder="全部工作表" clearable>
+      <el-select v-model="pairFilter" size="small" class="pair-select" placeholder="全部文件" clearable>
+        <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
+      </el-select>
+      <el-select v-model="sheetFilter" size="small" class="sheet-select" placeholder="全部工作表" clearable>
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <span class="diff-count">共 {{ session.compareResult?.diffs.length ?? 0 }} 处变动</span>
+      <span class="diff-count">共 {{ session.compareResult?.totalDiffs ?? 0 }} 处变动</span>
     </div>
     <el-table
-      :data="diffs"
+      :data="rows"
       size="small"
       height="100%"
       :row-class-name="rowClass"
       border
       @row-click="onRowClick"
     >
-      <el-table-column prop="sheet" label="工作表" width="140" show-overflow-tooltip />
-      <el-table-column prop="ref" label="坐标" width="80" />
+      <el-table-column v-if="showFileCol" prop="pairLabel" label="文件" width="220" show-overflow-tooltip />
+      <el-table-column label="工作表" width="130" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.diff.sheet }}</template>
+      </el-table-column>
+      <el-table-column label="坐标" width="80">
+        <template #default="{ row }">{{ row.diff.ref }}</template>
+      </el-table-column>
       <el-table-column label="上期值" min-width="110">
-        <template #default="{ row }">{{ valueText(row.prevValue) }}</template>
+        <template #default="{ row }">{{ valueText(row.diff.prevValue) }}</template>
       </el-table-column>
       <el-table-column label="本期值" min-width="110">
-        <template #default="{ row }">{{ valueText(row.currValue) }}</template>
+        <template #default="{ row }">{{ valueText(row.diff.currValue) }}</template>
       </el-table-column>
       <el-table-column label="变动率" width="100" align="right">
-        <template #default="{ row }">{{ rateText(row) }}</template>
+        <template #default="{ row }">{{ rateText(row.diff) }}</template>
       </el-table-column>
       <el-table-column label="类型" width="100">
-        <template #default="{ row }">{{ KIND_LABEL[row.kind as DiffKind] }}</template>
+        <template #default="{ row }">{{ KIND_LABEL[row.diff.kind as DiffKind] }}</template>
       </el-table-column>
     </el-table>
   </div>
@@ -78,6 +109,12 @@ function onRowClick(row: CellDiff): void {
   align-items: center;
   gap: 10px;
   padding: 8px 0;
+}
+.pair-select {
+  width: 280px;
+}
+.sheet-select {
+  width: 200px;
 }
 .diff-count {
   font-size: 13px;
