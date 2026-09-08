@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { SheetData } from '@shared/types'
+import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
@@ -34,6 +35,24 @@ const hitSet = computed(() => {
   return s
 })
 
+/** 合并区域 span 矩阵（行 0 起始，与 data 行索引一致） */
+const spans = computed(() =>
+  sheetData.value ? buildMergeSpans(sheetData.value.merges, sheetData.value.rowCount, sheetData.value.colCount) : null
+)
+
+/** el-table span-method：主格展开，被覆盖格隐藏 */
+function spanMethod({
+  rowIndex,
+  columnIndex
+}: {
+  rowIndex: number
+  columnIndex: number
+}): [number, number] {
+  const s = spans.value?.[rowIndex]?.[columnIndex]
+  if (!s) return [1, 1]
+  return [s.rowspan, s.colspan]
+}
+
 function colLetters(colCount: number): string[] {
   const out: string[] = []
   for (let c = 1; c <= colCount; c++) {
@@ -49,13 +68,6 @@ function colLetters(colCount: number): string[] {
   return out
 }
 
-function headerText(colIdx: number): string {
-  // 表头：第一行有值用第一行值，否则用列字母
-  const cell = sheetData.value?.cells[0]?.[colIdx]
-  if (cell && cell.v !== null && cell.v !== '') return String(cell.v)
-  return colLetters(sheetData.value?.colCount ?? 0)[colIdx] ?? String(colIdx + 1)
-}
-
 function cellText(rowIdx: number, colIdx: number): string {
   const cell = sheetData.value?.cells[rowIdx]?.[colIdx]
   return cell && cell.v !== null ? String(cell.v) : ''
@@ -63,8 +75,11 @@ function cellText(rowIdx: number, colIdx: number): string {
 
 function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }): string {
   const name = sheetName.value
-  if (!name) return ''
-  return hitSet.value.has(`${name}|${rowIndex + 1}|${columnIndex + 1}`) ? 'diff-hit' : ''
+  const classes: string[] = []
+  const s = spans.value?.[rowIndex]?.[columnIndex]
+  if (s && s.rowspan > 0) classes.push('merge-master')
+  if (name && hitSet.value.has(`${name}|${rowIndex + 1}|${columnIndex + 1}`)) classes.push('diff-hit')
+  return classes.join(' ')
 }
 
 function onCellClick(
@@ -145,17 +160,18 @@ watch(
     <el-table
       v-if="sheetData"
       ref="gridRef"
-      :data="sheetData.cells.slice(1).map((row, i) => ({ _rowIndex: i + 1, cells: row }))"
+      :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
       size="small"
       border
       height="100%"
       :cell-class-name="cellClass"
+      :span-method="spanMethod"
       @cell-click="onCellClick"
     >
       <el-table-column
         v-for="c in sheetData.colCount"
         :key="c"
-        :label="headerText(c - 1)"
+        :label="colLetters(sheetData.colCount)[c - 1]"
         :min-width="120"
         show-overflow-tooltip
       >
@@ -196,5 +212,10 @@ watch(
   background: #fff3bf !important;
   font-weight: 600;
   color: #c0392b;
+}
+.sheet-grid .el-table .merge-master {
+  text-align: center;
+  font-weight: 600;
+  vertical-align: middle;
 }
 </style>

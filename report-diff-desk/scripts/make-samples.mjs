@@ -83,19 +83,27 @@ XLSX.utils.book_append_sheet(
 // zip 样例：模拟「NR 报表包」场景——按压缩包内顺序配对（NR01 对 NR01、NR02 对 NR02）
 const zipBase = new JSZip()
 const zipCurr = new JSZip()
-function makeZipEntryBuf(rows) {
+function makeZipEntryBuf(rows, merges) {
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '经营数据')
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  if (merges) ws['!merges'] = merges
+  XLSX.utils.book_append_sheet(wb, ws, '经营数据')
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
 }
-// NR01：含 2 处变动（营收 100→200、费用 0→50）
+// NR01：含 2 处变动（营收 100→200、费用 0→50）；首行 A1:B1 合并标题（验证网格合并渲染）
 zipBase.file(
   'NR01_月_本外币_境内汇总数据_20260731.xlsx',
-  makeZipEntryBuf([['指标', '金额'], ['营收', 100], ['费用', 0], ['利润', 40]])
+  makeZipEntryBuf(
+    [['NR01 境内汇总数据', null], ['指标', '金额'], ['营收', 100], ['费用', 0], ['利润', 40]],
+    [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }]
+  )
 )
 zipCurr.file(
   'NR01_1910_月_本外币_境内汇总数据_20260831.xlsx',
-  makeZipEntryBuf([['指标', '金额'], ['营收', 200], ['费用', 50], ['利润', 40]])
+  makeZipEntryBuf(
+    [['NR01 境内汇总数据', null], ['指标', '金额'], ['营收', 200], ['费用', 50], ['利润', 40]],
+    [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }]
+  )
 )
 // NR02：无变动
 zipBase.file(

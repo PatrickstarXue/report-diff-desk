@@ -1,5 +1,5 @@
 import { read, utils } from 'xlsx'
-import type { GridCell, SheetData, WorkbookData } from '@shared/types'
+import type { GridCell, MergedRange, SheetData, WorkbookData } from '@shared/types'
 
 /** Excel Date（本地时区）→ "YYYY-MM-DD"，避免 toISOString 跨时区错位一天 */
 function formatLocalDate(d: Date): string {
@@ -53,7 +53,19 @@ export function parseExcel(
       }
       cells.push(row)
     }
-    sheets[name] = { name, rowCount: range.e.r - range.s.r + 1, colCount: range.e.c - range.s.c + 1, cells }
+    const merges: MergedRange[] | undefined = ws['!merges']?.map((m) => ({
+      r1: m.s.r,
+      c1: m.s.c,
+      r2: m.e.r,
+      c2: m.e.c
+    }))
+    sheets[name] = {
+      name,
+      rowCount: range.e.r - range.s.r + 1,
+      colCount: range.e.c - range.s.c + 1,
+      cells,
+      merges: merges && merges.length > 0 ? merges : undefined
+    }
   }
 
   return { id: crypto.randomUUID(), fileName, source, sheetNames, sheets }
