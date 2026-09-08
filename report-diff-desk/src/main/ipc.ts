@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { IPC } from '@shared/ipc'
@@ -7,6 +7,8 @@ import type {
   CompareRequest,
   CompareResult,
   DocContent,
+  ExportRequest,
+  ExportResult,
   LoadReportResult,
   MappingRows,
   OpenFileKind,
@@ -17,6 +19,8 @@ import type {
 } from '@shared/types'
 import { loadDocFile, loadReportFile } from './file/loader'
 import { parseExcel } from './file/excel'
+import { buildExcelBuffer } from './export/excel'
+import { buildHtmlReport } from './export/html'
 import { getWorkbook } from './store'
 
 const FILE_FILTERS: Record<OpenFileKind, { name: string; extensions: string[] }[]> = {
@@ -87,6 +91,38 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.docLoad, async (_e, req: { path: string }): Promise<DocContent> => {
     if (typeof req?.path !== 'string') throw new Error('无效的口径文档路径')
     return loadDocFile(req.path)
+  })
+
+  ipcMain.handle(IPC.exportRun, async (_e, req: ExportRequest): Promise<ExportResult> => {
+    if (!req?.compare || (req.format !== 'excel' && req.format !== 'html')) {
+      throw new Error('无效的导出请求')
+    }
+    const ext = req.format === 'excel' ? 'xlsx' : 'html'
+    const stamp = new Date()
+      .toISOString()
+      .slice(0, 16)
+      .replace(/[-:]/g, '')
+      .replace('T', '_')
+    let target = req.targetPath
+    if (!target) {
+      const r = await dialog.showSaveDialog({
+        title: '导出比对结果',
+        defaultPath: join(app.getPath('documents'), `比对结果_${stamp}.${ext}`),
+        filters: [
+          { name: ext === 'xlsx' ? 'Excel 工作簿' : 'HTML 报告', extensions: [ext] }
+        ]
+      })
+      if (r.canceled || !r.filePath) return { canceled: true }
+      target = r.filePath
+    }
+
+    if (req.format === 'excel') {
+      await writeFile(target, await buildExcelBuffer(req.compare))
+    } else {
+      await writeFile(target, buildHtmlReport(req.compare), 'utf-8')
+    }
+    shell.showItemInFolder(target)
+    return { canceled: false, path: target }
   })
 
   ipcMain.handle(IPC.recentGet, async (): Promise<RecentEntry[]> => {

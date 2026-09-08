@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useSessionStore } from './stores/session'
 import FilePanel from './components/FilePanel.vue'
 import DiffList from './components/DiffList.vue'
@@ -18,6 +19,19 @@ const summary = computed(() => {
       : ''
   return `${r.baseLabel} → ${r.currLabel}：${r.diffs.length} 处变动 / 共比对 ${r.totalCellsCompared} 格${extra}`
 })
+
+async function exportResult(format: 'excel' | 'html'): Promise<void> {
+  const r = session.compareResult
+  if (!r) return
+  try {
+    const res = await window.api.export({ format, compare: r, baseLabel: r.baseLabel, currLabel: r.currLabel })
+    if (!res.canceled && res.path) {
+      ElMessage.success(`已导出：${res.path}`)
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
 </script>
 
 <template>
@@ -25,6 +39,26 @@ const summary = computed(() => {
     <el-header class="app-header" height="48px">
       <span class="app-title">报表比对工具</span>
       <span class="app-summary">{{ summary }}</span>
+      <div class="app-export">
+        <el-button
+          size="small"
+          type="primary"
+          plain
+          :disabled="!session.compareResult"
+          @click="exportResult('excel')"
+        >
+          导出 Excel
+        </el-button>
+        <el-button
+          size="small"
+          type="primary"
+          plain
+          :disabled="!session.compareResult"
+          @click="exportResult('html')"
+        >
+          导出 HTML
+        </el-button>
+      </div>
     </el-header>
     <el-container>
       <el-aside width="260px" class="app-aside">
@@ -74,6 +108,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+.app-export {
+  display: flex;
+  gap: 8px;
 }
 .app-aside {
   border-right: 1px solid var(--el-border-color);
