@@ -21,8 +21,9 @@ async function pickReport(role: 'base' | 'curr'): Promise<void> {
 async function compare(): Promise<void> {
   try {
     await session.runCompare(threshold.value)
-    if (session.compareResult && session.compareResult.sheetsMatched.length === 0) {
-      ElMessage.warning('两份报表没有名称匹配的工作表，请确认文件版本一致')
+    const r = session.compareResult
+    if (r && r.pairs.length > 0 && r.pairs.every((p) => p.compare.sheetsMatched.length === 0)) {
+      ElMessage.warning('配对文件中没有名称匹配的工作表，请确认文件版本一致')
     }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
