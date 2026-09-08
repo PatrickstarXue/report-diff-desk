@@ -2,10 +2,10 @@ import { app, dialog, ipcMain, shell } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { IPC } from '@shared/ipc'
-import { compareWorkbooks } from '@shared/core/engine'
+import { matchWorkbookPairs } from '@shared/core/pairing'
 import type {
+  BatchCompareResult,
   CompareRequest,
-  CompareResult,
   DocContent,
   ExportRequest,
   ExportResult,
@@ -66,15 +66,17 @@ export function registerIpc(): void {
     }
   )
 
-  ipcMain.handle(IPC.compareRun, async (_e, req: CompareRequest): Promise<CompareResult> => {
-    if (typeof req?.baseId !== 'string' || typeof req?.currId !== 'string') {
+  ipcMain.handle(IPC.compareRun, async (_e, req: CompareRequest): Promise<BatchCompareResult> => {
+    if (!Array.isArray(req?.baseIds) || !Array.isArray(req?.currIds)) {
       throw new Error('无效的比对请求')
     }
-    const base = getWorkbook(req.baseId)
-    const curr = getWorkbook(req.currId)
-    if (!base) throw new Error('上期工作簿不存在或已被释放')
-    if (!curr) throw new Error('本期工作簿不存在或已被释放')
-    return compareWorkbooks(base, curr, typeof req.threshold === 'number' ? req.threshold : 0.5)
+    const base = req.baseIds.map((id) => getWorkbook(id)).filter((w) => w !== undefined)
+    const curr = req.currIds.map((id) => getWorkbook(id)).filter((w) => w !== undefined)
+    if (base.length !== req.baseIds.length || curr.length !== req.currIds.length) {
+      throw new Error('部分工作簿不存在或已被释放')
+    }
+    if (base.length === 0 || curr.length === 0) throw new Error('请先选择两份报表')
+    return matchWorkbookPairs(base, curr, typeof req.threshold === 'number' ? req.threshold : 0.5)
   })
 
   ipcMain.handle(IPC.mappingLoad, async (_e, req: { path: string }): Promise<MappingRows> => {
