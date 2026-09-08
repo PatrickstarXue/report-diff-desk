@@ -11,14 +11,24 @@ const sheetName = ref('')
 const sheetData = ref<SheetData | null>(null)
 const gridRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
 
-const workbook = computed(() => (side.value === 'base' ? session.baseWorkbook : session.currWorkbook))
+const pairOptions = computed(() =>
+  (session.compareResult?.pairs ?? []).map((p, i) => ({ index: i, label: p.pairLabel }))
+)
+
+/** 当前文件对的两侧工作簿（顺序配对：pair 索引即数组索引） */
+const workbook = computed(() =>
+  (side.value === 'base' ? session.baseWorkbooks : session.currWorkbooks)[
+    session.activePairIndex
+  ] ?? null
+)
 
 const sheetOptions = computed(() => workbook.value?.sheetNames ?? [])
 
-/** 变动格命中集合：`sheet|row|col`（1 起始），用于 cell-class-name */
+/** 变动格命中集合：`sheet|row|col`（1 起始），按当前文件对的结果 */
 const hitSet = computed(() => {
   const s = new Set<string>()
-  for (const d of session.compareResult?.diffs ?? []) {
+  const pair = session.compareResult?.pairs[session.activePairIndex]
+  for (const d of pair?.compare.diffs ?? []) {
     s.add(`${d.sheet}|${d.row}|${d.col}`)
   }
   return s
@@ -39,7 +49,7 @@ function colLetters(colCount: number): string[] {
   return out
 }
 
-function headerText(rowIdx: number, colIdx: number): string {
+function headerText(colIdx: number): string {
   // 表头：第一行有值用第一行值，否则用列字母
   const cell = sheetData.value?.cells[0]?.[colIdx]
   if (cell && cell.v !== null && cell.v !== '') return String(cell.v)
@@ -81,7 +91,7 @@ async function loadSheet(): Promise<void> {
   }
 }
 
-// 切换工作簿时重置并加载第一个 sheet
+// 切换工作簿（换文件对/换侧）时重置并加载第一个 sheet
 watch(
   [side, () => workbook.value?.id],
   () => {
@@ -93,16 +103,17 @@ watch(
 
 watch(sheetName, loadSheet)
 
-// DiffList 点击跳转：切 sheet + 估算滚动到目标行
+// DiffList 点击跳转：切文件对 + 切 sheet + 估算滚动到目标行
 watch(
   () => session.gridFocus,
   (focus) => {
     if (!focus) return
-    if (sheetOptions.value.includes(focus.sheet)) {
-      if (sheetName.value !== focus.sheet) sheetName.value = focus.sheet
-    }
+    session.activePairIndex = focus.pairIndex
     const target = focus
     setTimeout(() => {
+      if (sheetOptions.value.includes(target.sheet) && sheetName.value !== target.sheet) {
+        sheetName.value = target.sheet
+      }
       if (sheetName.value === target.sheet) {
         gridRef.value?.scrollTo({ top: Math.max(0, target.row - 3) * 40 })
       }
@@ -114,6 +125,14 @@ watch(
 <template>
   <div class="sheet-grid">
     <div class="grid-toolbar">
+      <el-select
+        v-model="session.activePairIndex"
+        size="small"
+        class="pair-select"
+        placeholder="选择文件对"
+      >
+        <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
+      </el-select>
       <el-radio-group v-model="side" size="small">
         <el-radio-button value="base">上期</el-radio-button>
         <el-radio-button value="curr">本期</el-radio-button>
@@ -136,14 +155,15 @@ watch(
       <el-table-column
         v-for="c in sheetData.colCount"
         :key="c"
-        :label="headerText(0, c - 1)"
+        :label="headerText(c - 1)"
         :min-width="120"
         show-overflow-tooltip
       >
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
-    <el-empty v-else-if="!workbook" description="请先选择报表文件" />
+    <el-empty v-else-if="!session.compareResult" description="请先比对" />
+    <el-empty v-else description="选择文件对查看网格" />
   </div>
 </template>
 
@@ -159,8 +179,11 @@ watch(
   gap: 10px;
   padding: 8px 0;
 }
+.pair-select {
+  width: 280px;
+}
 .sheet-select {
-  width: 200px;
+  width: 180px;
 }
 .grid-hint {
   font-size: 12px;
