@@ -6,6 +6,7 @@ import { compareWorkbooks } from '@shared/core/engine'
 import type {
   CompareRequest,
   CompareResult,
+  DocContent,
   LoadReportResult,
   MappingRows,
   OpenFileKind,
@@ -14,7 +15,7 @@ import type {
   RecentEntry,
   SheetData
 } from '@shared/types'
-import { loadReportFile } from './file/loader'
+import { loadDocFile, loadReportFile } from './file/loader'
 import { parseExcel } from './file/excel'
 import { getWorkbook } from './store'
 
@@ -81,6 +82,11 @@ export function registerIpc(): void {
       rows.push([String(row[0]?.v ?? ''), String(row[1]?.v ?? '')])
     }
     return { rows }
+  })
+
+  ipcMain.handle(IPC.docLoad, async (_e, req: { path: string }): Promise<DocContent> => {
+    if (typeof req?.path !== 'string') throw new Error('无效的口径文档路径')
+    return loadDocFile(req.path)
   })
 
   ipcMain.handle(IPC.recentGet, async (): Promise<RecentEntry[]> => {
