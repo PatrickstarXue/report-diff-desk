@@ -108,9 +108,26 @@ export interface LoadReportResult {
 }
 
 export interface CompareRequest {
-  baseId: string
-  currId: string
+  /** 工作簿 id 数组，顺序 = 配对顺序 */
+  baseIds: string[]
+  currIds: string[]
   threshold: number
+}
+
+/** 一对文件的比对结果 */
+export interface FilePairResult {
+  pairLabel: string
+  baseFileName: string
+  currFileName: string
+  compare: CompareResult
+}
+
+/** 批量比对结果：按顺序配对的逐份结果 + 未参与列表 */
+export interface BatchCompareResult {
+  pairs: FilePairResult[]
+  unmatchedBase: string[]
+  unmatchedCurr: string[]
+  totalDiffs: number
 }
 
 export interface ExportRequest {
