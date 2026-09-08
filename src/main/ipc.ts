@@ -7,6 +7,7 @@ import type {
   CompareRequest,
   CompareResult,
   LoadReportResult,
+  MappingRows,
   OpenFileKind,
   OpenFileRequest,
   OpenFileResult,
@@ -14,6 +15,7 @@ import type {
   SheetData
 } from '@shared/types'
 import { loadReportFile } from './file/loader'
+import { parseExcel } from './file/excel'
 import { getWorkbook } from './store'
 
 const FILE_FILTERS: Record<OpenFileKind, { name: string; extensions: string[] }[]> = {
@@ -68,6 +70,17 @@ export function registerIpc(): void {
     if (!base) throw new Error('上期工作簿不存在或已被释放')
     if (!curr) throw new Error('本期工作簿不存在或已被释放')
     return compareWorkbooks(base, curr, typeof req.threshold === 'number' ? req.threshold : 0.5)
+  })
+
+  ipcMain.handle(IPC.mappingLoad, async (_e, req: { path: string }): Promise<MappingRows> => {
+    if (typeof req?.path !== 'string') throw new Error('无效的映射表路径')
+    const wb = parseExcel(await readFile(req.path), 'mapping', 'file')
+    const sheet = wb.sheets[wb.sheetNames[0]]
+    const rows: string[][] = []
+    for (const row of sheet?.cells ?? []) {
+      rows.push([String(row[0]?.v ?? ''), String(row[1]?.v ?? '')])
+    }
+    return { rows }
   })
 
   ipcMain.handle(IPC.recentGet, async (): Promise<RecentEntry[]> => {
