@@ -11,12 +11,22 @@ export interface GridCell {
   isDate?: boolean
 }
 
+/** 合并区域（0 起始，含端点），对应 Excel !merges */
+export interface MergedRange {
+  r1: number
+  c1: number
+  r2: number
+  c2: number
+}
+
 export interface SheetData {
   name: string
   rowCount: number
   colCount: number
   /** 按行存储，缺省格为 null */
   cells: (GridCell | null)[][]
+  /** 合并区域；仅主格（左上角）有值 */
+  merges?: MergedRange[]
 }
 
 export interface WorkbookData {

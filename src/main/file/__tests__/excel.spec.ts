@@ -72,6 +72,22 @@ describe('parseExcel (xlsx)', () => {
     expect(parsed.sheets['空表'].colCount).toBe(0)
   })
 
+  it('透传合并区域 merges', () => {
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([['报表标题', null, null], ['指标', '金额'], ['营收', 100]])
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }] // A1:C1 合并标题
+    XLSX.utils.book_append_sheet(wb, ws, '数据')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+    const parsed = parseExcel(buf, 'merged.xlsx', 'file')
+    expect(parsed.sheets['数据'].merges).toEqual([{ r1: 0, c1: 0, r2: 0, c2: 2 }])
+    expect(parsed.sheets['数据'].cells[0][0]?.v).toBe('报表标题')
+  })
+
+  it('无合并区域时不带 merges 字段', () => {
+    const wb = parseExcel(makeWorkbookBuffer(), 'test.xlsx', 'file')
+    expect(wb.sheets['经营数据'].merges).toBeUndefined()
+  })
+
   it('支持 .xls 老格式 (biff8)', () => {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['老格式', 42]]), '数据')
