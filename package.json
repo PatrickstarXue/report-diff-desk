@@ -16,13 +16,10 @@
     "make:samples": "node scripts/make-samples.mjs"
   },
   "dependencies": {
-    "element-plus": "^2.14.5",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.2",
     "pdfjs-dist": "^4.10.38",
-    "pinia": "^4.0.3",
-    "vue": "^3.5.42",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
@@ -32,9 +29,12 @@
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "element-plus": "^2.14.5",
+    "pinia": "^4.0.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vitest": "^3.2.7",
+    "vue": "^3.5.42",
     "vue-tsc": "^3.3.11"
   },
   "allowScripts": {
