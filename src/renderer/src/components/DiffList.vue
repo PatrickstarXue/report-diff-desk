@@ -1,18 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { CellDiff, DiffKind } from '@shared/types'
+import { KIND_LABEL } from '@shared/core/engine'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
 const sheetFilter = ref('')
-
-const KIND_LABEL: Record<DiffKind, string> = {
-  increase: '增长',
-  decrease: '下降',
-  'zero-base': '从零新增',
-  new: '新增',
-  removed: '移除'
-}
 
 const sheetOptions = computed(() => session.compareResult?.sheetsMatched ?? [])
 

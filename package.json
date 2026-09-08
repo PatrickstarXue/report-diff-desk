@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "element-plus": "^2.14.5",
+    "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.2",
     "pdfjs-dist": "^4.10.38",

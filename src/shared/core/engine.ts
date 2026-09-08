@@ -1,5 +1,14 @@
-import type { CellDiff, CompareResult, GridCell, WorkbookData } from '@shared/types'
+import type { CellDiff, CompareResult, DiffKind, GridCell, WorkbookData } from '@shared/types'
 import { toNumeric } from './numeric'
+
+/** 变动类型中文标签（UI 与导出共用） */
+export const KIND_LABEL: Record<DiffKind, string> = {
+  increase: '增长',
+  decrease: '下降',
+  'zero-base': '从零新增',
+  new: '新增',
+  removed: '移除'
+}
 
 /** 1 起始坐标 → "C12" 展示坐标 */
 export function encodeCell(row: number, col: number): string {
