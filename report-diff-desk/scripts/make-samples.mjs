@@ -65,10 +65,26 @@ const currSheet3 = XLSX.utils.aoa_to_sheet([
 XLSX.utils.book_append_sheet(base, baseSheet3, '多一列')
 XLSX.utils.book_append_sheet(curr, currSheet3, '多一列')
 
+// 口径映射表样例：两列（指标名、口径说明）
+const mapping = XLSX.utils.book_new()
+XLSX.utils.book_append_sheet(
+  mapping,
+  XLSX.utils.aoa_to_sheet([
+    ['指标名', '口径说明'],
+    ['营收', '营业收入，指报告期内销售商品、提供劳务取得的收入（不含税）'],
+    ['成本', '营业成本，与营业收入配比结转的直接成本'],
+    ['费用', '期间费用合计，含销售费用、管理费用、财务费用'],
+    ['利润', '营业利润，营业收入减去营业成本与期间费用后的余额']
+  ]),
+  '口径'
+)
+
 // SheetJS ESM 版无 fs 集成，write 成 buffer 后手动写盘
 writeFileSync(join(outDir, '上期.xlsx'), XLSX.write(base, { type: 'buffer', bookType: 'xlsx' }))
 writeFileSync(join(outDir, '本期.xlsx'), XLSX.write(curr, { type: 'buffer', bookType: 'xlsx' }))
+writeFileSync(join(outDir, '口径映射表.xlsx'), XLSX.write(mapping, { type: 'buffer', bookType: 'xlsx' }))
 console.log('样例已生成：')
 console.log(' ', join(outDir, '上期.xlsx'))
 console.log(' ', join(outDir, '本期.xlsx'))
+console.log(' ', join(outDir, '口径映射表.xlsx'))
 console.log('预期比对结果：6 处变动（营收增长、费用从零、移除指标、新增指标、千分位增长、多一列新增）')

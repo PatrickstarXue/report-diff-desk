@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { useSessionStore } from './stores/session'
 import FilePanel from './components/FilePanel.vue'
 import DiffList from './components/DiffList.vue'
+import SheetGrid from './components/SheetGrid.vue'
+import MappingPanel from './components/MappingPanel.vue'
 
 const session = useSessionStore()
 
@@ -28,8 +30,18 @@ const summary = computed(() => {
         <FilePanel />
       </el-aside>
       <el-main class="app-main">
-        <DiffList v-if="session.compareResult" />
-        <el-empty v-else description="选择上期与本期报表后点击「开始比对」" />
+        <el-tabs v-model="session.uiTab" class="app-tabs">
+          <el-tab-pane label="比对结果" name="result">
+            <DiffList v-if="session.compareResult" />
+            <el-empty v-else description="选择上期与本期报表后点击「开始比对」" />
+          </el-tab-pane>
+          <el-tab-pane label="网格高亮" name="grid">
+            <SheetGrid />
+          </el-tab-pane>
+          <el-tab-pane label="口径查询" name="mapping">
+            <MappingPanel />
+          </el-tab-pane>
+        </el-tabs>
       </el-main>
     </el-container>
   </el-container>
@@ -65,5 +77,14 @@ body {
 .app-main {
   padding: 12px;
   overflow: hidden;
+}
+.app-tabs {
+  height: 100%;
+}
+.app-tabs .el-tabs__content {
+  height: calc(100% - 40px);
+}
+.app-tabs .el-tab-pane {
+  height: 100%;
 }
 </style>

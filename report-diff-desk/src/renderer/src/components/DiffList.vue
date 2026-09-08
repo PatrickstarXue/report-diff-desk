@@ -34,6 +34,10 @@ function rowClass({ row }: { row: CellDiff }): string {
 function valueText(v: CellDiff['prevValue']): string {
   return v === null || v === '' ? '（空）' : String(v)
 }
+
+function onRowClick(row: CellDiff): void {
+  session.focusCell(row.sheet, row.row)
+}
 </script>
 
 <template>
@@ -44,7 +48,14 @@ function valueText(v: CellDiff['prevValue']): string {
       </el-select>
       <span class="diff-count">共 {{ session.compareResult?.diffs.length ?? 0 }} 处变动</span>
     </div>
-    <el-table :data="diffs" size="small" height="100%" :row-class-name="rowClass" border>
+    <el-table
+      :data="diffs"
+      size="small"
+      height="100%"
+      :row-class-name="rowClass"
+      border
+      @row-click="onRowClick"
+    >
       <el-table-column prop="sheet" label="工作表" width="140" show-overflow-tooltip />
       <el-table-column prop="ref" label="坐标" width="80" />
       <el-table-column label="上期值" min-width="110">

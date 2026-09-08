@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import type { CompareResult, WorkbookData } from '@shared/types'
+import { buildIndex, type MappingIndex } from '@shared/core/mapping'
 
 interface SessionState {
   baseWorkbooks: WorkbookData[]
@@ -10,6 +11,14 @@ interface SessionState {
   currPath: string
   compareResult: CompareResult | null
   loading: boolean
+  mappingIndex: MappingIndex | null
+  mappingCount: number
+  /** 点选单元格（文本/位置），驱动口径查询 */
+  selectedCell: { text: string; sheet: string; ref: string } | null
+  /** DiffList 点击行 → 网格跳转目标 */
+  gridFocus: { sheet: string; row: number } | null
+  /** 右侧标签页：result | grid | mapping | doc */
+  uiTab: string
 }
 
 export const useSessionStore = defineStore('session', {
@@ -21,7 +30,12 @@ export const useSessionStore = defineStore('session', {
     basePath: '',
     currPath: '',
     compareResult: null,
-    loading: false
+    loading: false,
+    mappingIndex: null,
+    mappingCount: 0,
+    selectedCell: null,
+    gridFocus: null,
+    uiTab: 'result'
   }),
 
   getters: {
@@ -72,6 +86,24 @@ export const useSessionStore = defineStore('session', {
       } finally {
         this.loading = false
       }
+    },
+
+    async loadMappingFile(path: string): Promise<void> {
+      const res = await window.api.loadMapping(path)
+      this.mappingIndex = buildIndex(res.rows)
+      this.mappingCount = this.mappingIndex.size
+    },
+
+    /** 点选网格单元格：记录文本并切到口径页 */
+    selectCell(text: string, sheet: string, ref: string): void {
+      this.selectedCell = { text, sheet, ref }
+      this.uiTab = 'mapping'
+    },
+
+    /** DiffList 行点击：切到网格并跳转对应 sheet/行 */
+    focusCell(sheet: string, row: number): void {
+      this.gridFocus = { sheet, row }
+      this.uiTab = 'grid'
     }
   }
 })
