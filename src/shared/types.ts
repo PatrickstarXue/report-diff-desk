@@ -132,9 +132,7 @@ export interface BatchCompareResult {
 
 export interface ExportRequest {
   format: 'excel' | 'html'
-  compare: CompareResult
-  baseLabel: string
-  currLabel: string
+  compare: BatchCompareResult
   targetPath?: string
 }
 

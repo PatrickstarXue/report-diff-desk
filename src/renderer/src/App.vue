@@ -14,17 +14,17 @@ const summary = computed(() => {
   const r = session.compareResult
   if (!r) return ''
   const extra =
-    r.sheetsOnlyInBase.length || r.sheetsOnlyInCurr.length
-      ? `；仅上期 ${r.sheetsOnlyInBase.length} 张、仅本期 ${r.sheetsOnlyInCurr.length} 张未参与比对`
+    r.unmatchedBase.length || r.unmatchedCurr.length
+      ? `；未参与比对：上期 ${r.unmatchedBase.length} 个、本期 ${r.unmatchedCurr.length} 个`
       : ''
-  return `${r.baseLabel} → ${r.currLabel}：${r.diffs.length} 处变动 / 共比对 ${r.totalCellsCompared} 格${extra}`
+  return `配对 ${r.pairs.length} 份文件：${r.totalDiffs} 处变动${extra}`
 })
 
 async function exportResult(format: 'excel' | 'html'): Promise<void> {
   const r = session.compareResult
   if (!r) return
   try {
-    const res = await window.api.export({ format, compare: r, baseLabel: r.baseLabel, currLabel: r.currLabel })
+    const res = await window.api.export({ format, compare: r })
     if (!res.canceled && res.path) {
       ElMessage.success(`已导出：${res.path}`)
     }
