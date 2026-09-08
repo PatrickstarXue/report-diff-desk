@@ -1,0 +1,125 @@
+// 全部核心类型。main 与 renderer 共享，必须 JSON 可序列化（无 Map/Set/类实例）。
+
+export type CellValue = number | string | boolean | null
+
+export interface GridCell {
+  /** 显示值；公式格为缓存计算值 */
+  v: CellValue
+  /** 公式文本（若有） */
+  f?: string
+  /** 原为日期单元格（v 为 ISO 字符串） */
+  isDate?: boolean
+}
+
+export interface SheetData {
+  name: string
+  rowCount: number
+  colCount: number
+  /** 按行存储，缺省格为 null */
+  cells: (GridCell | null)[][]
+}
+
+export interface WorkbookData {
+  id: string
+  fileName: string
+  source: 'file' | 'zip'
+  sheetNames: string[]
+  sheets: Record<string, SheetData>
+}
+
+// —— 比对 ——
+
+export type DiffKind = 'increase' | 'decrease' | 'zero-base' | 'new' | 'removed'
+
+export interface CellDiff {
+  sheet: string
+  /** 展示坐标，如 "C12"（1 起始） */
+  ref: string
+  row: number
+  col: number
+  prevValue: CellValue
+  currValue: CellValue
+  prevNum: number | null
+  currNum: number | null
+  /** 小数（0.5 = 50%）；zero-base/new 固定 1，removed 固定 -1 */
+  changeRate: number | null
+  kind: DiffKind
+}
+
+export interface CompareResult {
+  baseId: string
+  currId: string
+  baseLabel: string
+  currLabel: string
+  threshold: number
+  sheetsMatched: string[]
+  sheetsOnlyInBase: string[]
+  sheetsOnlyInCurr: string[]
+  /** 仅含命中阈值者，按 sheet → row → col 排序 */
+  diffs: CellDiff[]
+  totalCellsCompared: number
+  generatedAt: string
+}
+
+// —— 口径映射与文档 ——
+
+/** 两列映射 Excel 的原样数据（列 0 = 指标名，列 1 = 口径说明） */
+export interface MappingRows {
+  rows: string[][]
+}
+
+export type DocKind = 'docx' | 'pdf' | 'txt'
+
+export interface DocContent {
+  kind: DocKind
+  name: string
+  /** docx：mammoth 输出的 HTML */
+  html?: string
+  /** pdf 逐页文本；txt 为单元素数组 */
+  pages?: string[]
+}
+
+// —— 最近记录 ——
+
+export interface RecentEntry {
+  basePath: string
+  currPath: string
+  at: string
+}
+
+// —— IPC 契约（入参/出参类型） ——
+
+export type OpenFileKind = 'report' | 'zip' | 'mapping' | 'doc'
+
+export interface OpenFileRequest {
+  kind: OpenFileKind
+  title?: string
+}
+
+export interface OpenFileResult {
+  canceled: boolean
+  path?: string
+}
+
+export interface LoadReportResult {
+  workbooks: WorkbookData[]
+}
+
+export interface CompareRequest {
+  baseId: string
+  currId: string
+  threshold: number
+}
+
+export interface ExportRequest {
+  format: 'excel' | 'html'
+  compare: CompareResult
+  baseLabel: string
+  currLabel: string
+  targetPath?: string
+}
+
+export interface ExportResult {
+  canceled: boolean
+  path?: string
+}

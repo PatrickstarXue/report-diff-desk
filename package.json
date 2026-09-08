@@ -1,0 +1,44 @@
+{
+  "name": "report-diff-desk",
+  "version": "0.1.0",
+  "description": "报表比对桌面工具：本地 Excel/zip 环比比对、变动>50% 标记、口径映射查询",
+  "main": "./out/main/index.js",
+  "author": "TAO",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:win": "electron-vite build && electron-builder --win",
+    "typecheck:node": "vue-tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest run",
+    "make:samples": "node scripts/make-samples.mjs"
+  },
+  "dependencies": {
+    "element-plus": "^2.14.5",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.2",
+    "pdfjs-dist": "^4.10.38",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.42",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vitest/coverage-v8": "^3.2.7",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.7",
+    "vue-tsc": "^3.3.11"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "electron@44.2.0": true
+  }
+}
