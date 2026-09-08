@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { CompareResult, DiffKind } from '@shared/types'
+import type { BatchCompareResult, CompareResult, DiffKind } from '@shared/types'
 import { KIND_LABEL } from '@shared/core/engine'
 
 /** 行填充色（中国习惯：红涨绿跌橙新增），ARGB 格式 */
@@ -11,13 +11,20 @@ const FILL: Record<DiffKind, string> = {
   removed: 'FFFDF6EC'
 }
 
-/**
- * 变动明细 xlsx（每行一个变动单元格，行填充色 + 变动率百分比格式）。
- * 用 exceljs 而非 SheetJS 写入：SheetJS 社区版 xlsx 写 fill 样式会丢失。
- */
-export async function buildExcelBuffer(result: CompareResult): Promise<Buffer> {
-  const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet('变动明细')
+/** sheet 名 = 文件名去扩展名，去 Excel 非法字符、截 31 字符、重名加序号 */
+function sheetNameOf(fileName: string, used: Set<string>): string {
+  let name = fileName.replace(/\.(xlsx|xls)$/i, '').replace(/[\\/?*[\]:]/g, '_').slice(0, 31)
+  let candidate = name
+  let i = 2
+  while (used.has(candidate)) {
+    candidate = `${name.slice(0, 27)}~${i++}`
+  }
+  used.add(candidate)
+  return candidate
+}
+
+function appendResultSheet(wb: ExcelJS.Workbook, name: string, result: CompareResult): void {
+  const ws = wb.addWorksheet(name)
   ws.columns = [
     { header: '工作表', key: 'sheet', width: 16 },
     { header: '坐标', key: 'ref', width: 10 },
@@ -35,6 +42,17 @@ export async function buildExcelBuffer(result: CompareResult): Promise<Buffer> {
     })
     row.getCell(5).numFmt = '0.0%'
   }
+}
 
+/**
+ * 批量变动明细 xlsx：每个文件对一个 sheet（sheet 名 = 上期文件名去扩展名）。
+ * 用 exceljs 而非 SheetJS 写入：SheetJS 社区版 xlsx 写 fill 样式会丢失。
+ */
+export async function buildExcelBuffer(batch: BatchCompareResult): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  const used = new Set<string>()
+  for (const p of batch.pairs) {
+    appendResultSheet(wb, sheetNameOf(p.baseFileName, used), p.compare)
+  }
   return Buffer.from(await wb.xlsx.writeBuffer())
 }

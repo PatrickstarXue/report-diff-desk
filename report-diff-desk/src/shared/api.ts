@@ -1,6 +1,6 @@
 import type {
+  BatchCompareResult,
   CompareRequest,
-  CompareResult,
   DocContent,
   ExportRequest,
   ExportResult,
@@ -17,7 +17,7 @@ export interface Api {
   openFile(req: OpenFileRequest): Promise<OpenFileResult>
   loadReport(path: string): Promise<LoadReportResult>
   getSheet(workbookId: string, sheetName: string): Promise<SheetData>
-  compare(req: CompareRequest): Promise<CompareResult>
+  compare(req: CompareRequest): Promise<BatchCompareResult>
   loadMapping(path: string): Promise<MappingRows>
   loadDoc(path: string): Promise<DocContent>
   export(req: ExportRequest): Promise<ExportResult>
