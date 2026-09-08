@@ -7,10 +7,12 @@ const session = useSessionStore()
 const threshold = ref(50)
 
 async function pickReport(role: 'base' | 'curr'): Promise<void> {
-  const res = await window.api.openFile({ kind: 'report', title: role === 'base' ? '选择上期报表' : '选择本期报表' })
+  const res = await window.api.openFile({ kind: 'report', title: role === 'base' ? '选择上期报表（Excel 或 zip 压缩包）' : '选择本期报表（Excel 或 zip 压缩包）' })
   if (res.canceled || !res.path) return
   try {
     await session.loadPair(role, res.path)
+    const count = role === 'base' ? session.baseWorkbooks.length : session.currWorkbooks.length
+    ElMessage.success(`已加载 ${count} 个 Excel，将按压缩包内顺序自动配对比对`)
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }
@@ -35,30 +37,18 @@ async function compare(): Promise<void> {
     <div class="pick-row">
       <el-button size="small" @click="pickReport('base')">选择上期报表</el-button>
       <div class="pick-info" :title="session.basePath">{{ session.basePath || '未选择' }}</div>
+      <div v-if="session.baseWorkbooks.length" class="pick-count">
+        含 {{ session.baseWorkbooks.length }} 个 Excel
+      </div>
     </div>
-    <el-select
-      v-if="session.baseWorkbooks.length > 1"
-      v-model="session.baseId"
-      size="small"
-      class="wb-select"
-      placeholder="选择工作簿"
-    >
-      <el-option v-for="w in session.baseWorkbooks" :key="w.id" :label="w.fileName" :value="w.id" />
-    </el-select>
 
     <div class="pick-row">
       <el-button size="small" @click="pickReport('curr')">选择本期报表</el-button>
       <div class="pick-info" :title="session.currPath">{{ session.currPath || '未选择' }}</div>
+      <div v-if="session.currWorkbooks.length" class="pick-count">
+        含 {{ session.currWorkbooks.length }} 个 Excel
+      </div>
     </div>
-    <el-select
-      v-if="session.currWorkbooks.length > 1"
-      v-model="session.currId"
-      size="small"
-      class="wb-select"
-      placeholder="选择工作簿"
-    >
-      <el-option v-for="w in session.currWorkbooks" :key="w.id" :label="w.fileName" :value="w.id" />
-    </el-select>
 
     <div class="threshold-row">
       <span class="threshold-label">变动阈值</span>
@@ -69,7 +59,7 @@ async function compare(): Promise<void> {
     <el-button
       type="primary"
       class="compare-btn"
-      :disabled="!session.baseId || !session.currId"
+      :disabled="!session.baseWorkbooks.length || !session.currWorkbooks.length"
       :loading="session.loading"
       @click="compare"
     >
@@ -101,8 +91,9 @@ async function compare(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wb-select {
-  width: 100%;
+.pick-count {
+  font-size: 12px;
+  color: var(--el-color-primary);
 }
 .threshold-row {
   display: flex;

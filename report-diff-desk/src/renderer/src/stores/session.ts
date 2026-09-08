@@ -1,22 +1,22 @@
 import { defineStore } from 'pinia'
-import type { CompareResult, DocContent, WorkbookData } from '@shared/types'
+import type { BatchCompareResult, DocContent, FilePairResult, WorkbookData } from '@shared/types'
 import { buildIndex, type MappingIndex } from '@shared/core/mapping'
 
 interface SessionState {
   baseWorkbooks: WorkbookData[]
   currWorkbooks: WorkbookData[]
-  baseId: string | null
-  currId: string | null
   basePath: string
   currPath: string
-  compareResult: CompareResult | null
+  compareResult: BatchCompareResult | null
+  /** 当前选中的文件对索引（网格/明细按此过滤） */
+  activePairIndex: number
   loading: boolean
   mappingIndex: MappingIndex | null
   mappingCount: number
   /** 点选单元格（文本/位置），驱动口径查询 */
   selectedCell: { text: string; sheet: string; ref: string } | null
   /** DiffList 点击行 → 网格跳转目标 */
-  gridFocus: { sheet: string; row: number } | null
+  gridFocus: { pairIndex: number; sheet: string; row: number } | null
   /** 当前加载的口径文档 */
   docContent: DocContent | null
   /** 右侧标签页：result | grid | mapping | doc */
@@ -27,11 +27,10 @@ export const useSessionStore = defineStore('session', {
   state: (): SessionState => ({
     baseWorkbooks: [],
     currWorkbooks: [],
-    baseId: null,
-    currId: null,
     basePath: '',
     currPath: '',
     compareResult: null,
+    activePairIndex: 0,
     loading: false,
     mappingIndex: null,
     mappingCount: 0,
@@ -42,43 +41,42 @@ export const useSessionStore = defineStore('session', {
   }),
 
   getters: {
-    baseWorkbook: (s): WorkbookData | null =>
-      s.baseWorkbooks.find((w) => w.id === s.baseId) ?? null,
-    currWorkbook: (s): WorkbookData | null =>
-      s.currWorkbooks.find((w) => w.id === s.currId) ?? null
+    activePair: (s): FilePairResult | null => s.compareResult?.pairs[s.activePairIndex] ?? null,
+    /** 顺序配对：pair 索引即两侧工作簿数组索引 */
+    activeBase: (s): WorkbookData | null => s.baseWorkbooks[s.activePairIndex] ?? null,
+    activeCurr: (s): WorkbookData | null => s.currWorkbooks[s.activePairIndex] ?? null
   },
 
   actions: {
-    /** 加载上期/本期报表文件；zip 多工作簿时清空原选择由用户下拉指定 */
+    /** 加载上期/本期报表文件（单 Excel 或 zip 包）；zip 内全部工作簿自动参与顺序配对 */
     async loadPair(role: 'base' | 'curr', path: string): Promise<void> {
       this.loading = true
       try {
         const res = await window.api.loadReport(path)
         if (res.error) throw new Error(res.error)
+        if (res.workbooks.length === 0) throw new Error('文件中没有可解析的 Excel')
         if (role === 'base') {
           this.baseWorkbooks = res.workbooks
           this.basePath = path
-          this.baseId = res.workbooks[0]?.id ?? null
         } else {
           this.currWorkbooks = res.workbooks
           this.currPath = path
-          this.currId = res.workbooks[0]?.id ?? null
         }
-        if (res.workbooks.length === 0) throw new Error('文件中没有可解析的 Excel')
       } finally {
         this.loading = false
       }
     },
 
     async runCompare(threshold: number): Promise<void> {
-      if (!this.baseId || !this.currId) return
+      if (!this.baseWorkbooks.length || !this.currWorkbooks.length) return
       this.loading = true
       try {
         this.compareResult = await window.api.compare({
-          baseId: this.baseId,
-          currId: this.currId,
+          baseIds: this.baseWorkbooks.map((w) => w.id),
+          currIds: this.currWorkbooks.map((w) => w.id),
           threshold: threshold / 100
         })
+        this.activePairIndex = 0
         const recent = await window.api.getRecent()
         await window.api.setRecent(
           [
@@ -103,9 +101,9 @@ export const useSessionStore = defineStore('session', {
       this.uiTab = 'mapping'
     },
 
-    /** DiffList 行点击：切到网格并跳转对应 sheet/行 */
-    focusCell(sheet: string, row: number): void {
-      this.gridFocus = { sheet, row }
+    /** DiffList 行点击：切到网格并跳转对应文件对/sheet/行 */
+    focusCell(pairIndex: number, sheet: string, row: number): void {
+      this.gridFocus = { pairIndex, sheet, row }
       this.uiTab = 'grid'
     }
   }
