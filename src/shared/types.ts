@@ -103,6 +103,8 @@ export interface OpenFileResult {
 
 export interface LoadReportResult {
   workbooks: WorkbookData[]
+  /** 解析失败时的用户可读错误信息 */
+  error?: string
 }
 
 export interface CompareRequest {
