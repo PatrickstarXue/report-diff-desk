@@ -4,10 +4,16 @@ import type { CellDiff, DiffKind } from '@shared/types'
 import { KIND_LABEL } from '@shared/core/engine'
 import { useSessionStore } from '../stores/session'
 
+const props = defineProps<{ modelValue?: number | null }>()
+const emit = defineEmits<{ 'update:modelValue': [val: number | null] }>()
+
 const session = useSessionStore()
 const sheetFilter = ref('')
-/** null = 全部文件对 */
-const pairFilter = ref<number | null>(null)
+/** null = 全部文件对；由父级（OverviewPanel 联动）外部控制 */
+const pairFilter = computed<number | null>({
+  get: () => props.modelValue ?? null,
+  set: (val) => emit('update:modelValue', val)
+})
 
 interface DiffRow {
   pairIndex: number
