@@ -33,11 +33,13 @@ async function loadSource(buffer: Buffer): Promise<ExportSource> {
   try {
     const wb = new ExcelJS.Workbook()
     await wb.xlsx.load(data)
-    return { kind: 'xlsx', wb }
+    // biff8 老格式：exceljs load 不抛错但解析出 0 个 sheet，须降级
+    if (wb.worksheets.length > 0) return { kind: 'xlsx', wb }
   } catch {
-    const parsed = parseExcel(buffer, 'legacy.xls', 'file')
-    return { kind: 'xls', sheets: parsed.sheetNames.map((n) => parsed.sheets[n]) }
+    // 非 xlsx 输入：降级
   }
+  const parsed = parseExcel(buffer, 'legacy.xls', 'file')
+  return { kind: 'xls', sheets: parsed.sheetNames.map((n) => parsed.sheets[n]) }
 }
 
 /** diff → 某侧需标紫的 `sheet(trim)|r|c` 集合；该侧无值的格（new 的上期侧 / removed 的本期侧）不标 */
@@ -129,7 +131,8 @@ export async function buildExcelZipBuffer(
     const p = batch.pairs[i]
     const out = new ExcelJS.Workbook()
     await appendPair(out, p.compare, baseBufs[i], currBufs[i])
-    const entryName = p.baseFileName.split('/').pop() ?? p.baseFileName
+    // 导出内容统一为 xlsx（含 .xls 降级重建），扩展名必须与内容一致
+    const entryName = (p.baseFileName.split('/').pop() ?? p.baseFileName).replace(/\.xls$/i, '.xlsx')
     zip.file(entryName, Buffer.from(await out.xlsx.writeBuffer()))
   }
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
