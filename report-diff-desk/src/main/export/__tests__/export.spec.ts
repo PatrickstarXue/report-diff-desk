@@ -143,7 +143,7 @@ describe('buildExcelZipBuffer', () => {
     expect(wb.worksheets.map((w) => w.name)).toEqual(['上期_数据', '上期_附注', '本期_数据', '本期_附注'])
   })
 
-  it('.xls 老格式：降级为值+合并重建，仍两 sheet 并标紫', async () => {
+  it('.xls 老格式：降级为值+合并重建，仍两 sheet 并标紫；条目扩展名统一为 .xlsx', async () => {
     const makeXls = (rows: unknown[][]): Buffer => {
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '数据')
@@ -156,11 +156,30 @@ describe('buildExcelZipBuffer', () => {
 
     const { out } = await exportZipOf(basePath, currPath)
     const zip = await JSZip.loadAsync(out)
+    const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name)
+    expect(names).toEqual(['base.xlsx'])
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(await entryBuf(zip, 'base.xls'))
+    await wb.xlsx.load(await entryBuf(zip, 'base.xlsx'))
     expect(wb.worksheets.map((w) => w.name)).toEqual(['上期', '本期'])
     expect(wb.worksheets[0].getCell('B3').value).toBe(100)
     expect(fillArgOf(wb.worksheets[0].getCell('B3'))).toBe(PURPLE_FILL_ARG)
+  })
+
+  it('exceljs load 不抛错但 0 sheet（真实 biff8 行为）：走降级不产出空工作簿', async () => {
+    // 空工作簿 xlsx：exceljs 能"成功"load 且 worksheets 为空——与真实 .xls 行为一致
+    const makeEmptyXlsx = async (): Promise<Buffer> => {
+      const wb = new ExcelJS.Workbook()
+      return Buffer.from(await wb.xlsx.writeBuffer())
+    }
+    const basePath = join(tmpDir, 'empty.xls')
+    const currPath = join(tmpDir, 'empty2.xls')
+    writeFileSync(basePath, await makeEmptyXlsx())
+    writeFileSync(currPath, await makeEmptyXlsx())
+
+    const { out } = await exportZipOf(basePath, currPath)
+    const zip = await JSZip.loadAsync(out)
+    const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name)
+    expect(names).toEqual(['empty.xlsx'])
   })
 })
 
