@@ -24,7 +24,13 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
   const r = session.compareResult
   if (!r) return
   try {
-    const res = await window.api.export({ format, compare: r })
+    // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
+    const res = await window.api.export({
+      format,
+      compare: JSON.parse(JSON.stringify(r)),
+      basePath: session.basePath,
+      currPath: session.currPath
+    })
     if (!res.canceled && res.path) {
       ElMessage.success(`已导出：${res.path}`)
     }

@@ -143,6 +143,9 @@ export interface BatchCompareResult {
 export interface ExportRequest {
   format: 'excel' | 'html'
   compare: BatchCompareResult
+  /** 原文件路径：zip 导出需要重新读取原文件以保留格式 */
+  basePath?: string
+  currPath?: string
   targetPath?: string
 }
 
