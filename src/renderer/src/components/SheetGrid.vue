@@ -7,7 +7,7 @@ import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
 
-const side = ref<'base' | 'curr'>('base')
+const side = ref<'base' | 'curr'>('curr')
 const sheetName = ref('')
 const sheetData = ref<SheetData | null>(null)
 const gridRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
@@ -149,8 +149,8 @@ watch(
         <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
       </el-select>
       <el-radio-group v-model="side" size="small">
-        <el-radio-button value="base">上期</el-radio-button>
         <el-radio-button value="curr">本期</el-radio-button>
+        <el-radio-button value="base">上期</el-radio-button>
       </el-radio-group>
       <el-select v-model="sheetName" size="small" class="sheet-select" placeholder="选择工作表">
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
