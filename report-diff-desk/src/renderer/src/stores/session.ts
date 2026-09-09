@@ -37,7 +37,7 @@ export const useSessionStore = defineStore('session', {
     selectedCell: null,
     gridFocus: null,
     docContent: null,
-    uiTab: 'result'
+    uiTab: 'grid'
   }),
 
   getters: {

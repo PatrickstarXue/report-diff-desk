@@ -72,12 +72,12 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
       </el-aside>
       <el-main class="app-main">
         <el-tabs v-model="session.uiTab" class="app-tabs">
+          <el-tab-pane label="网格高亮" name="grid">
+            <SheetGrid />
+          </el-tab-pane>
           <el-tab-pane label="比对结果" name="result">
             <DiffList v-if="session.compareResult" />
             <el-empty v-else description="选择上期与本期报表后点击「开始比对」" />
-          </el-tab-pane>
-          <el-tab-pane label="网格高亮" name="grid">
-            <SheetGrid />
           </el-tab-pane>
           <el-tab-pane label="口径查询" name="mapping">
             <MappingPanel />
