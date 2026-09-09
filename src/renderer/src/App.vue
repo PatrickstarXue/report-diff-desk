@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from './stores/session'
 import FilePanel from './components/FilePanel.vue'
@@ -7,18 +7,12 @@ import DiffList from './components/DiffList.vue'
 import SheetGrid from './components/SheetGrid.vue'
 import MappingPanel from './components/MappingPanel.vue'
 import DocViewer from './components/DocViewer.vue'
+import OverviewPanel from './components/OverviewPanel.vue'
 
 const session = useSessionStore()
 
-const summary = computed(() => {
-  const r = session.compareResult
-  if (!r) return ''
-  const extra =
-    r.unmatchedBase.length || r.unmatchedCurr.length
-      ? `；未参与比对：上期 ${r.unmatchedBase.length} 个、本期 ${r.unmatchedCurr.length} 个`
-      : ''
-  return `配对 ${r.pairs.length} 份文件：${r.totalDiffs} 处变动${extra}`
-})
+/** 概览卡选中的文件对索引（null = 全部），联动 DiffList 筛选 */
+const overviewFilter = ref<number | null>(null)
 
 async function exportResult(format: 'excel' | 'html'): Promise<void> {
   const r = session.compareResult
@@ -44,7 +38,6 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
   <el-container class="app-root">
     <el-header class="app-header" height="48px">
       <span class="app-title">报表比对工具</span>
-      <span class="app-summary">{{ summary }}</span>
       <div class="app-export">
         <el-button
           size="small"
@@ -76,7 +69,14 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
             <SheetGrid />
           </el-tab-pane>
           <el-tab-pane label="比对结果" name="result">
-            <DiffList v-if="session.compareResult" />
+            <template v-if="session.compareResult">
+              <OverviewPanel
+                :compare-result="session.compareResult"
+                :active-index="overviewFilter"
+                @select="(i) => (overviewFilter = i)"
+              />
+              <DiffList v-model:pair-filter="overviewFilter" />
+            </template>
             <el-empty v-else description="选择上期与本期报表后点击「开始比对」" />
           </el-tab-pane>
           <el-tab-pane label="口径查询" name="mapping">
@@ -108,15 +108,8 @@ body {
   font-size: 16px;
   font-weight: 600;
 }
-.app-summary {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
 .app-export {
+  margin-left: auto;
   display: flex;
   gap: 8px;
 }
