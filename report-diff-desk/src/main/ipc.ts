@@ -19,7 +19,7 @@ import type {
 } from '@shared/types'
 import { loadDocFile, loadReportFile } from './file/loader'
 import { parseExcel } from './file/excel'
-import { buildExcelBuffer } from './export/excel'
+import { buildExcelZipBuffer } from './export/excel'
 import { buildHtmlReport } from './export/html'
 import { getWorkbook } from './store'
 
@@ -99,7 +99,8 @@ export function registerIpc(): void {
     if (!req?.compare || (req.format !== 'excel' && req.format !== 'html')) {
       throw new Error('无效的导出请求')
     }
-    const ext = req.format === 'excel' ? 'xlsx' : 'html'
+    // excel 格式导出为 zip 压缩包（每对文件一个 xlsx，保持原表格式）
+    const ext = req.format === 'excel' ? 'zip' : 'html'
     const stamp = new Date()
       .toISOString()
       .slice(0, 16)
@@ -111,7 +112,7 @@ export function registerIpc(): void {
         title: '导出比对结果',
         defaultPath: join(app.getPath('documents'), `比对结果_${stamp}.${ext}`),
         filters: [
-          { name: ext === 'xlsx' ? 'Excel 工作簿' : 'HTML 报告', extensions: [ext] }
+          { name: ext === 'zip' ? 'Zip 压缩包' : 'HTML 报告', extensions: [ext] }
         ]
       })
       if (r.canceled || !r.filePath) return { canceled: true }
@@ -119,7 +120,16 @@ export function registerIpc(): void {
     }
 
     if (req.format === 'excel') {
-      await writeFile(target, await buildExcelBuffer(req.compare))
+      if (typeof req.basePath !== 'string' || typeof req.currPath !== 'string') {
+        throw new Error('缺少原文件路径，无法导出')
+      }
+      try {
+        await writeFile(target, await buildExcelZipBuffer(req.compare, req.basePath, req.currPath))
+      } catch (err) {
+        throw new Error(
+          `原报表读取失败（文件可能已被移动或修改），请重新加载后再导出：${err instanceof Error ? err.message : String(err)}`
+        )
+      }
     } else {
       await writeFile(target, buildHtmlReport(req.compare), 'utf-8')
     }
