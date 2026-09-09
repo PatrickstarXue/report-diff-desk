@@ -209,9 +209,9 @@ watch(
 
 <style>
 .sheet-grid .el-table .diff-hit {
-  background: #fff3bf !important;
+  background: #ffd6e8 !important;
   font-weight: 600;
-  color: #c0392b;
+  color: #d6336c;
 }
 .sheet-grid .el-table .merge-master {
   text-align: center;
