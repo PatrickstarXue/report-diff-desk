@@ -53,7 +53,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           :disabled="!session.compareResult"
           @click="exportResult('excel')"
         >
-          导出 Excel
+          导出 zip（Excel 原格式 + 紫色标记）
         </el-button>
         <el-button
           size="small"
