@@ -102,7 +102,15 @@ function onCellClick(row: { _rowIndex: number }, column: { _columnIndex: number 
   if (c < 0) return // 行号列不触发口径查询
   const r = row._rowIndex + 1
   const text = cellText(row._rowIndex, c)
-  session.selectCell(text, sheetName.value, `${colLetters(sheetData.value?.colCount ?? 0)[c] ?? ''}${r}`)
+  const letters = colLetters(sheetData.value?.colCount ?? 0)
+  session.selectCell(
+    text,
+    sheetName.value,
+    `${letters[c] ?? ''}${r}`,
+    r,
+    c + 1,
+    workbook.value?.fileName ?? ''
+  )
 }
 
 async function loadSheet(): Promise<void> {

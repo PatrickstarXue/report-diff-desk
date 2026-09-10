@@ -14,7 +14,7 @@ interface SessionState {
   mappingIndex: MappingIndex | null
   mappingCount: number
   /** 点选单元格（文本/位置），驱动口径查询 */
-  selectedCell: { text: string; sheet: string; ref: string } | null
+  selectedCell: { text: string; sheet: string; ref: string; row: number; col: number } | null
   /** DiffList 点击行 → 网格跳转目标（含列，用于紫色标记聚焦格） */
   gridFocus: { pairIndex: number; sheet: string; row: number; col: number } | null
   /** 已加载的口径文档列表（多文档存留） */
@@ -104,9 +104,37 @@ export const useSessionStore = defineStore('session', {
       this.mappingCount = this.mappingIndex.size
     },
 
-    /** 点选网格单元格：记录文本并切到口径页 */
-    selectCell(text: string, sheet: string, ref: string): void {
-      this.selectedCell = { text, sheet, ref }
+    /** 点选网格单元格：记录坐标，点到点规则匹配（前缀精准匹配规则文档 sheet），切到口径查询页 */
+    selectCell(text: string, sheet: string, ref: string, row: number, col: number, reportFileName: string): void {
+      this.selectedCell = { text, sheet, ref, row, col }
+
+      // 点到点匹配：取报表文件名第一个下划线前内容（前缀），与规则文档 sheet 名前缀精准配对
+      const fileNameBase = reportFileName.split('/').pop() ?? reportFileName
+      const prefix = fileNameBase.split('_')[0]
+
+      if (prefix) {
+        for (const doc of this.docList) {
+          if (doc.kind !== 'xlsx' && doc.kind !== 'xls') continue
+          for (const ws of doc.workbooks ?? []) {
+            if (ws.name.split('_')[0] === prefix) {
+              this.activeDocIndex = this.docList.indexOf(doc)
+              this.activeDocSheet = ws.name
+              const cell = ws.cells[row - 1]?.[col - 1]
+              this.selectedDocCell = {
+                sheet: ws.name,
+                row,
+                col,
+                value: cell && cell.v !== null ? String(cell.v) : ''
+              }
+              this.uiTab = 'mapping'
+              return
+            }
+          }
+        }
+      }
+
+      // 未匹配：清空局部详情，仍切到口径查询页
+      this.selectedDocCell = null
       this.uiTab = 'mapping'
     },
 

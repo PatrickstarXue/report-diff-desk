@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { GridCell } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
+const overviewRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
+
+// 网格跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
+watch(
+  () => session.selectedDocCell,
+  (sel) => {
+    if (!sel) return
+    setTimeout(() => {
+      overviewRef.value?.scrollTo({ top: Math.max(0, (sel.row - 3) * 28) })
+    }, 100)
+  }
+)
 
 // —— 口径资料（整体 / 局部） ——
 
@@ -174,6 +186,7 @@ async function removeCurrentDoc(): Promise<void> {
     <div v-if="activeSheet" class="doc-browser">
       <div class="doc-overview">
         <el-table
+          ref="overviewRef"
           :data="gridRows"
           size="small"
           border
@@ -200,7 +213,15 @@ async function removeCurrentDoc(): Promise<void> {
             {{ session.selectedDocCell.sheet }} 第 {{ session.selectedDocCell.row }} 行 / 第
             {{ session.selectedDocCell.col }} 列
           </div>
-          <pre class="cell-full-body">{{ session.selectedDocCell.value }}</pre>
+          <pre v-if="session.selectedDocCell.value" class="cell-full-body">{{
+            session.selectedDocCell.value
+          }}</pre>
+          <el-alert
+            v-else
+            type="info"
+            :closable="false"
+            title="该单元格在规则文档中无内容"
+          />
         </div>
         <el-alert
           v-else
