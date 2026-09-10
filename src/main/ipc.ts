@@ -1,6 +1,6 @@
 import { app, dialog, ipcMain, shell } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { IPC } from '@shared/ipc'
 import { matchWorkbookPairs } from '@shared/core/pairing'
 import type {
@@ -34,15 +34,45 @@ function recentPath(): string {
   return join(app.getPath('userData'), 'recent.json')
 }
 
+function lastDirPath(): string {
+  return join(app.getPath('userData'), 'last-dir.json')
+}
+
+/** 上次打开文件对话框的目录（持久化到 userData），作为下次对话框默认目录 */
+let lastOpenDir: string | null = null
+
+async function loadLastDir(): Promise<void> {
+  try {
+    const data = JSON.parse(await readFile(lastDirPath(), 'utf-8'))
+    if (typeof data === 'string') lastOpenDir = data
+  } catch {
+    lastOpenDir = null
+  }
+}
+
+function rememberDir(path: string): void {
+  lastOpenDir = dirname(path)
+  void writeFile(lastDirPath(), JSON.stringify(lastOpenDir), 'utf-8').catch(() => {
+    // 写失败静默，仅影响下次默认目录
+  })
+}
+
 export function registerIpc(): void {
+  void loadLastDir()
+
   ipcMain.handle(IPC.dialogOpenFile, async (_e, req: OpenFileRequest): Promise<OpenFileResult> => {
     const filters = FILE_FILTERS[req?.kind] ?? FILE_FILTERS.report
     const r = await dialog.showOpenDialog({
       title: req?.title,
+      defaultPath: lastOpenDir ?? undefined,
       filters,
       properties: ['openFile']
     })
-    return r.canceled || !r.filePaths[0] ? { canceled: true } : { canceled: false, path: r.filePaths[0] }
+    if (!r.canceled && r.filePaths[0]) {
+      rememberDir(r.filePaths[0])
+      return { canceled: false, path: r.filePaths[0] }
+    }
+    return { canceled: true }
   })
 
   ipcMain.handle(IPC.reportLoad, async (_e, req: { path: string }): Promise<LoadReportResult> => {
