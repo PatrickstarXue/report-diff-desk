@@ -75,6 +75,8 @@ function cellText(rowIdx: number, colIdx: number): string {
 }
 
 function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }): string {
+  // 第 0 列是行号列：不参与合并/命中/聚焦标记
+  if (columnIndex === 0) return ''
   const name = sheetName.value
   const classes: string[] = []
   const s = spans.value?.[rowIndex]?.[columnIndex]
@@ -183,7 +185,14 @@ watch(
       :span-method="spanMethod"
       @cell-click="onCellClick"
     >
-      <el-table-column type="index" label="行号" width="56" align="right" />
+      <el-table-column
+        type="index"
+        label=""
+        width="56"
+        align="right"
+        fixed="left"
+        class-name="row-number-col"
+      />
       <el-table-column
         v-for="c in sheetData.colCount"
         :key="c"
@@ -224,6 +233,11 @@ watch(
 </style>
 
 <style>
+.sheet-grid .el-table .row-number-col {
+  background: #f5f7fa;
+  color: #909399;
+  font-weight: 400;
+}
 .sheet-grid .el-table .diff-hit {
   background: #ffd6e8 !important;
   font-weight: 600;
