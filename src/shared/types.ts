@@ -83,6 +83,8 @@ export type DocKind = 'docx' | 'pdf' | 'txt' | 'xlsx' | 'xls'
 export interface DocContent {
   kind: DocKind
   name: string
+  /** 来源文件路径（持久化文档库恢复用） */
+  path: string
   /** docx：mammoth 输出的 HTML */
   html?: string
   /** pdf 逐页文本；txt 为单元素数组 */

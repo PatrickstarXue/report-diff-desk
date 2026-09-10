@@ -110,13 +110,35 @@ export const useSessionStore = defineStore('session', {
       this.uiTab = 'mapping'
     },
 
-    /** 加载口径文档并入文档列表（可多次加载并存；报表文档默认选第一个 sheet） */
+    /** 加载口径文档并入文档列表（可多次加载并存），并持久化文档库 */
     async addDoc(path: string): Promise<void> {
       const doc = await window.api.loadDoc(path)
       this.docList.push(doc)
       this.activeDocIndex = this.docList.length - 1
       this.activeDocSheet = doc.workbooks?.[0]?.name ?? ''
       this.selectedDocCell = null
+      await this._persistDocLibrary()
+    },
+
+    /** 启动时恢复持久化文档库：逐个重新加载（文件被移动的跳过） */
+    async initDocLibrary(): Promise<void> {
+      const paths = await window.api.getDocLibrary()
+      for (const p of paths) {
+        try {
+          const doc = await window.api.loadDoc(p)
+          if (!this.docList.some((d) => d.path === p)) this.docList.push(doc)
+        } catch {
+          // 文件已被移动/删除：跳过该文档
+        }
+      }
+      if (this.docList.length > 0) {
+        this.activeDocIndex = 0
+        this.activeDocSheet = this.docList[0]?.workbooks?.[0]?.name ?? ''
+      }
+    },
+
+    async _persistDocLibrary(): Promise<void> {
+      await window.api.setDocLibrary(this.docList.map((d) => d.path))
     },
 
     /** 切换当前显示文档（不同文档清除已选单元格） */

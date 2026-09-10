@@ -29,12 +29,17 @@ export async function loadDocFile(path: string): Promise<DocContent> {
   const ext = extname(path).toLowerCase()
   const name = path.split(/[\\/]/).pop() ?? path
 
-  if (ext === '.docx') return { kind: 'docx', name, html: await parseDocx(buf) }
-  if (ext === '.pdf') return { kind: 'pdf', name, pages: await parsePdf(buf) }
-  if (ext === '.txt') return { kind: 'txt', name, pages: await parseTxt(buf) }
+  if (ext === '.docx') return { kind: 'docx', path, name, html: await parseDocx(buf) }
+  if (ext === '.pdf') return { kind: 'pdf', path, name, pages: await parsePdf(buf) }
+  if (ext === '.txt') return { kind: 'txt', path, name, pages: await parseTxt(buf) }
   if (ext === '.xlsx' || ext === '.xls') {
     const wb = parseExcel(buf, name, 'file')
-    return { kind: ext === '.xlsx' ? 'xlsx' : 'xls', name, workbooks: wb.sheetNames.map((n) => wb.sheets[n]) }
+    return {
+      kind: ext === '.xlsx' ? 'xlsx' : 'xls',
+      path,
+      name,
+      workbooks: wb.sheetNames.map((n) => wb.sheets[n])
+    }
   }
   throw new Error(`暂不支持的口径文档格式：${ext || '(无扩展名)'}（旧版 .doc 请另存为 .docx）`)
 }
