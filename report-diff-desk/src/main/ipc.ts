@@ -34,6 +34,10 @@ function recentPath(): string {
   return join(app.getPath('userData'), 'recent.json')
 }
 
+function docLibraryPath(): string {
+  return join(app.getPath('userData'), 'doc-library.json')
+}
+
 function lastDirPath(): string {
   return join(app.getPath('userData'), 'last-dir.json')
 }
@@ -123,6 +127,23 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.docLoad, async (_e, req: { path: string }): Promise<DocContent> => {
     if (typeof req?.path !== 'string') throw new Error('无效的口径文档路径')
     return loadDocFile(req.path)
+  })
+
+  ipcMain.handle(IPC.docLibraryGet, async (): Promise<string[]> => {
+    try {
+      const data = JSON.parse(await readFile(docLibraryPath(), 'utf-8'))
+      return Array.isArray(data) ? data.filter((x) => typeof x === 'string') : []
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.docLibrarySet, async (_e, req: { paths: string[] }): Promise<void> => {
+    try {
+      await writeFile(docLibraryPath(), JSON.stringify(req?.paths ?? []), 'utf-8')
+    } catch {
+      // 写失败静默，仅影响下次启动的文档库恢复
+    }
   })
 
   ipcMain.handle(IPC.exportRun, async (_e, req: ExportRequest): Promise<ExportResult> => {

@@ -20,6 +20,9 @@ export interface Api {
   compare(req: CompareRequest): Promise<BatchCompareResult>
   loadMapping(path: string): Promise<MappingRows>
   loadDoc(path: string): Promise<DocContent>
+  /** 口径文档库：已加载文档路径的持久化列表 */
+  getDocLibrary(): Promise<string[]>
+  setDocLibrary(paths: string[]): Promise<void>
   export(req: ExportRequest): Promise<ExportResult>
   getRecent(): Promise<RecentEntry[]>
   setRecent(items: RecentEntry[]): Promise<void>

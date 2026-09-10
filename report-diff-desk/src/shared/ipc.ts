@@ -6,6 +6,8 @@ export const IPC = {
   compareRun: 'compare:run',
   mappingLoad: 'mapping:load',
   docLoad: 'doc:load',
+  docLibraryGet: 'docLibrary:get',
+  docLibrarySet: 'docLibrary:set',
   exportRun: 'export:run',
   recentGet: 'recent:get',
   recentSet: 'recent:set'

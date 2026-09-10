@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from './stores/session'
 import FilePanel from './components/FilePanel.vue'
@@ -10,6 +10,11 @@ import DocViewer from './components/DocViewer.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
 
 const session = useSessionStore()
+
+// 启动时恢复持久化口径文档库
+onMounted(() => {
+  void session.initDocLibrary()
+})
 
 /** 概览卡选中的文件对索引（null = 全部），联动 DiffList 筛选 */
 const overviewFilter = ref<number | null>(null)
