@@ -245,8 +245,7 @@ async function removeCurrentDoc(): Promise<void> {
   min-height: 0;
 }
 .doc-overview {
-  width: 50%;
-  max-height: 55%;
+  height: 50%;
   overflow: auto;
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
