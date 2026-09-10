@@ -15,8 +15,8 @@ interface SessionState {
   mappingCount: number
   /** 点选单元格（文本/位置），驱动口径查询 */
   selectedCell: { text: string; sheet: string; ref: string } | null
-  /** DiffList 点击行 → 网格跳转目标 */
-  gridFocus: { pairIndex: number; sheet: string; row: number } | null
+  /** DiffList 点击行 → 网格跳转目标（含列，用于紫色标记聚焦格） */
+  gridFocus: { pairIndex: number; sheet: string; row: number; col: number } | null
   /** 当前加载的口径文档 */
   docContent: DocContent | null
   /** 右侧标签页：result | grid | mapping | doc */
@@ -101,10 +101,15 @@ export const useSessionStore = defineStore('session', {
       this.uiTab = 'mapping'
     },
 
-    /** DiffList 行点击：切到网格并跳转对应文件对/sheet/行 */
-    focusCell(pairIndex: number, sheet: string, row: number): void {
-      this.gridFocus = { pairIndex, sheet, row }
+    /** DiffList 行点击：切到网格并跳转对应文件对/sheet/单元格 */
+    focusCell(pairIndex: number, sheet: string, row: number, col: number): void {
+      this.gridFocus = { pairIndex, sheet, row, col }
       this.uiTab = 'grid'
+    },
+
+    /** 离开网格时清除聚焦格标记 */
+    clearGridFocus(): void {
+      this.gridFocus = null
     }
   }
 })

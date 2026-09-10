@@ -96,7 +96,7 @@ function valueText(v: CellDiff['prevValue']): string {
 }
 
 function onRowClick(row: DiffRow): void {
-  session.focusCell(row.pairIndex, row.diff.sheet, row.diff.row)
+  session.focusCell(row.pairIndex, row.diff.sheet, row.diff.row, row.diff.col)
 }
 </script>
 
