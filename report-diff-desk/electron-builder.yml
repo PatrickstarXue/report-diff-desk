@@ -11,7 +11,7 @@ win:
   target:
     - nsis
     - portable
-  icon: resources/icon.png
+  icon: resources/icon.ico
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
