@@ -40,7 +40,12 @@ const spans = computed(() =>
   sheetData.value ? buildMergeSpans(sheetData.value.merges, sheetData.value.rowCount, sheetData.value.colCount) : null
 )
 
-/** el-table span-method：主格展开，被覆盖格隐藏；第 0 列是行号列，不参与合并 */
+/** el-table 列序号 → 数据列索引（第 0 列是行号列，数据列从 1 开始） */
+function dataCol(columnIndex: number): number {
+  return columnIndex - 1
+}
+
+/** el-table span-method：主格展开，被覆盖格隐藏；行号列（第 0 列）不参与合并 */
 function spanMethod({
   rowIndex,
   columnIndex
@@ -48,8 +53,9 @@ function spanMethod({
   rowIndex: number
   columnIndex: number
 }): [number, number] {
-  if (columnIndex === 0) return [1, 1]
-  const s = spans.value?.[rowIndex]?.[columnIndex]
+  const c = dataCol(columnIndex)
+  if (c < 0) return [1, 1]
+  const s = spans.value?.[rowIndex]?.[c]
   if (!s) return [1, 1]
   return [s.rowspan, s.colspan]
 }
@@ -75,35 +81,28 @@ function cellText(rowIdx: number, colIdx: number): string {
 }
 
 function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }): string {
-  // 第 0 列是行号列：不参与合并/命中/聚焦标记
-  if (columnIndex === 0) return ''
+  const c = dataCol(columnIndex)
+  // 行号列：不参与合并/命中/聚焦标记
+  if (c < 0) return ''
   const name = sheetName.value
   const classes: string[] = []
-  const s = spans.value?.[rowIndex]?.[columnIndex]
+  const s = spans.value?.[rowIndex]?.[c]
   if (s && s.rowspan > 0) classes.push('merge-master')
   // DiffList 跳转聚焦格：紫色标记（优先于 diff-hit）
   const f = session.gridFocus
-  if (
-    f &&
-    f.pairIndex === session.activePairIndex &&
-    f.sheet === name &&
-    f.row === rowIndex + 1 &&
-    f.col === columnIndex + 1
-  ) {
+  if (f && f.pairIndex === session.activePairIndex && f.sheet === name && f.row === rowIndex + 1 && f.col === c + 1) {
     classes.push('cell-focused')
   }
-  if (name && hitSet.value.has(`${name}|${rowIndex + 1}|${columnIndex + 1}`)) classes.push('diff-hit')
+  if (name && hitSet.value.has(`${name}|${rowIndex + 1}|${c + 1}`)) classes.push('diff-hit')
   return classes.join(' ')
 }
 
-function onCellClick(
-  row: { _rowIndex: number },
-  column: { _columnIndex: number }
-): void {
+function onCellClick(row: { _rowIndex: number }, column: { _columnIndex: number }): void {
+  const c = dataCol(column._columnIndex)
+  if (c < 0) return // 行号列不触发口径查询
   const r = row._rowIndex + 1
-  const c = column._columnIndex + 1
-  const text = cellText(row._rowIndex, column._columnIndex)
-  session.selectCell(text, sheetName.value, `${colLetters(sheetData.value?.colCount ?? 0)[c - 1] ?? ''}${r}`)
+  const text = cellText(row._rowIndex, c)
+  session.selectCell(text, sheetName.value, `${colLetters(sheetData.value?.colCount ?? 0)[c] ?? ''}${r}`)
 }
 
 async function loadSheet(): Promise<void> {
@@ -172,7 +171,7 @@ watch(
       <el-select v-model="sheetName" size="small" class="sheet-select" placeholder="选择工作表">
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <span class="grid-hint">黄色高亮 = 变动 &gt; 阈值；点击单元格查看口径</span>
+      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；点击单元格查看口径</span>
     </div>
     <el-table
       v-if="sheetData"
