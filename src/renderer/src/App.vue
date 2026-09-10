@@ -73,7 +73,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
         </div>
         <div class="app-footer">
           <div>报表比对工具 v{{ appVersion }}</div>
-          <div>开发者：TAO</div>
+          <div>©2026 CRB@xuehaotao</div>
         </div>
       </el-aside>
       <el-main class="app-main">
