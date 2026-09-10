@@ -9,6 +9,10 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: '报表比对工具',
+    // dev 模式窗口图标；打包版由 exe 自带图标（files 不含 resources/）
+    icon: process.env['ELECTRON_RENDERER_URL']
+      ? join(__dirname, '../../resources/icon.png')
+      : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
