@@ -97,20 +97,16 @@ function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: n
   return classes.join(' ')
 }
 
-function onCellClick(row: { _rowIndex: number }, column: { _columnIndex: number }): void {
-  const c = dataCol(column._columnIndex)
-  if (c < 0) return // 行号列不触发口径查询
+function onCellClick(row: { _rowIndex: number }, column: { property?: string }): void {
+  // 用列 prop（形如 "c0"）定位数据列；不使用内部 _columnIndex（在合并列下不可靠）
+  const prop = column?.property
+  if (typeof prop !== 'string' || !prop.startsWith('c')) return
+  const c = Number(prop.slice(1))
+  if (Number.isNaN(c)) return
   const r = row._rowIndex + 1
   const text = cellText(row._rowIndex, c)
   const letters = colLetters(sheetData.value?.colCount ?? 0)
-  session.selectCell(
-    text,
-    sheetName.value,
-    `${letters[c] ?? ''}${r}`,
-    r,
-    c + 1,
-    workbook.value?.fileName ?? ''
-  )
+  session.selectCell(text, sheetName.value, `${letters[c] ?? ''}${r}`, r, c + 1, workbook.value?.fileName ?? '')
 }
 
 async function loadSheet(): Promise<void> {
@@ -203,6 +199,7 @@ watch(
       <el-table-column
         v-for="c in sheetData.colCount"
         :key="c"
+        :prop="'c' + (c - 1)"
         :label="colLetters(sheetData.colCount)[c - 1]"
         :min-width="120"
         show-overflow-tooltip
