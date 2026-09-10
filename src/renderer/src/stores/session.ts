@@ -137,6 +137,19 @@ export const useSessionStore = defineStore('session', {
       }
     },
 
+    /** 删除已打开的口径资料（文档库持久化同步更新） */
+    removeDoc(index: number): void {
+      if (index < 0 || index >= this.docList.length) return
+      this.docList.splice(index, 1)
+      if (this.activeDocIndex >= this.docList.length) {
+        this.activeDocIndex = Math.max(0, this.docList.length - 1)
+      }
+      const d = this.docList[this.activeDocIndex]
+      this.activeDocSheet = d?.workbooks?.[0]?.name ?? ''
+      this.selectedDocCell = null
+      void this._persistDocLibrary()
+    },
+
     async _persistDocLibrary(): Promise<void> {
       await window.api.setDocLibrary(this.docList.map((d) => d.path))
     },
