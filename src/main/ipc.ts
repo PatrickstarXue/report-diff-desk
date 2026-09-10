@@ -27,7 +27,7 @@ const FILE_FILTERS: Record<OpenFileKind, { name: string; extensions: string[] }[
   report: [{ name: 'Excel 报表 / Zip 压缩包', extensions: ['xlsx', 'xls', 'zip'] }],
   zip: [{ name: 'Zip 压缩包', extensions: ['zip'] }],
   mapping: [{ name: 'Excel 映射表', extensions: ['xlsx', 'xls'] }],
-  doc: [{ name: '口径文档', extensions: ['docx', 'pdf', 'txt'] }]
+  doc: [{ name: '口径文档', extensions: ['xlsx', 'xls', 'docx', 'pdf', 'txt'] }]
 }
 
 function recentPath(): string {
