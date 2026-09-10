@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { SheetData } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
@@ -97,17 +97,41 @@ function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: n
   return classes.join(' ')
 }
 
-function onCellClick(row: { _rowIndex: number }, column: { property?: string }): void {
-  // 用列 prop（形如 "c0"）定位数据列；不使用内部 _columnIndex（在合并列下不可靠）
+// —— 右键菜单：右键单元格展开「查看该单元格口径」，点击后跳转（防止左键误触） ——
+
+const ctxMenu = ref<{ row: number; col: number; x: number; y: number } | null>(null)
+
+function closeCtxMenu(): void {
+  ctxMenu.value = null
+}
+
+function onCellContextMenu(
+  row: { _rowIndex: number },
+  column: { property?: string },
+  _cell: unknown,
+  event: MouseEvent
+): void {
   const prop = column?.property
   if (typeof prop !== 'string' || !prop.startsWith('c')) return
   const c = Number(prop.slice(1))
   if (Number.isNaN(c)) return
-  const r = row._rowIndex + 1
-  const text = cellText(row._rowIndex, c)
+  event.preventDefault()
+  ctxMenu.value = { row: row._rowIndex + 1, col: c + 1, x: event.clientX, y: event.clientY }
+}
+
+function jumpFromMenu(): void {
+  const m = ctxMenu.value
+  if (!m) return
+  closeCtxMenu()
+  const r = m.row
+  const c = m.col - 1
+  const text = cellText(r - 1, c)
   const letters = colLetters(sheetData.value?.colCount ?? 0)
   session.selectCell(text, sheetName.value, `${letters[c] ?? ''}${r}`, r, c + 1, workbook.value?.fileName ?? '')
 }
+
+// 全局单击任意位置关闭右键菜单
+onMounted(() => document.addEventListener('click', closeCtxMenu))
 
 async function loadSheet(): Promise<void> {
   const wb = workbook.value
@@ -123,8 +147,11 @@ async function loadSheet(): Promise<void> {
   }
 }
 
-// 离开网格标签页（组件销毁）时清除聚焦格紫色标记
-onUnmounted(() => session.clearGridFocus())
+// 离开网格标签页（组件销毁）时清除聚焦格紫色标记并移除全局监听
+onUnmounted(() => {
+  document.removeEventListener('click', closeCtxMenu)
+  session.clearGridFocus()
+})
 
 // 切换工作簿（换文件对/换侧）时重置并加载第一个 sheet
 watch(
@@ -175,7 +202,7 @@ watch(
       <el-select v-model="sheetName" size="small" class="sheet-select" placeholder="选择工作表">
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；点击单元格查看口径</span>
+      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
     </div>
     <el-table
       v-if="sheetData"
@@ -186,7 +213,7 @@ watch(
       height="100%"
       :cell-class-name="cellClass"
       :span-method="spanMethod"
-      @cell-click="onCellClick"
+      @cell-contextmenu="onCellContextMenu"
     >
       <el-table-column
         type="index"
@@ -207,6 +234,14 @@ watch(
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
+    <!-- 右键菜单：查看该单元格口径 -->
+    <div
+      v-if="ctxMenu"
+      class="sheet-ctx-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+    >
+      <div class="ctx-item" @click="jumpFromMenu">查看该单元格口径</div>
+    </div>
     <el-empty v-else-if="!session.compareResult" description="请先比对" />
     <el-empty v-else description="选择文件对查看网格" />
   </div>
@@ -256,5 +291,25 @@ watch(
   text-align: center;
   font-weight: 600;
   vertical-align: middle;
+}
+.sheet-ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  background: #fff;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+  min-width: 160px;
+}
+.ctx-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ctx-item:hover {
+  background: #f5f7fa;
+  color: #409eff;
 }
 </style>
