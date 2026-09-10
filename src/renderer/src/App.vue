@@ -10,10 +10,12 @@ import DocViewer from './components/DocViewer.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
 
 const session = useSessionStore()
+const appVersion = ref('')
 
 // 启动时恢复持久化口径文档库
 onMounted(() => {
   void session.initDocLibrary()
+  void window.api.getVersion().then((v) => (appVersion.value = v))
 })
 
 /** 概览卡选中的文件对索引（null = 全部），联动 DiffList 筛选 */
@@ -66,7 +68,13 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
     </el-header>
     <el-container>
       <el-aside width="260px" class="app-aside">
-        <FilePanel />
+        <div class="app-aside-body">
+          <FilePanel />
+        </div>
+        <div class="app-footer">
+          <div>报表比对工具 v{{ appVersion }}</div>
+          <div>开发者：TAO</div>
+        </div>
       </el-aside>
       <el-main class="app-main">
         <el-tabs v-model="session.uiTab" class="app-tabs">
@@ -119,7 +127,22 @@ body {
   gap: 8px;
 }
 .app-aside {
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--el-border-color);
+}
+.app-aside-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.app-footer {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+  border-top: 1px solid var(--el-border-color);
+  text-align: center;
 }
 .app-main {
   padding: 12px;

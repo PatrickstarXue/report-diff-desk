@@ -1,6 +1,6 @@
 {
   "name": "report-diff-desk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "报表比对桌面工具：本地 Excel/zip 环比比对、变动>50% 标记、口径映射查询",
   "main": "./out/main/index.js",
   "author": "TAO",

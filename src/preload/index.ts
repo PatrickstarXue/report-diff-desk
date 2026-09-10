@@ -21,7 +21,8 @@ const api: Api = {
   setDocLibrary: (paths: string[]) => ipcRenderer.invoke(IPC.docLibrarySet, { paths }),
   export: (req: ExportRequest) => ipcRenderer.invoke(IPC.exportRun, req),
   getRecent: () => ipcRenderer.invoke(IPC.recentGet),
-  setRecent: (items: RecentEntry[]) => ipcRenderer.invoke(IPC.recentSet, { items })
+  setRecent: (items: RecentEntry[]) => ipcRenderer.invoke(IPC.recentSet, { items }),
+  getVersion: () => ipcRenderer.invoke(IPC.appVersion)
 }
 
 contextBridge.exposeInMainWorld('api', api)

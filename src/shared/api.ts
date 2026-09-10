@@ -26,4 +26,6 @@ export interface Api {
   export(req: ExportRequest): Promise<ExportResult>
   getRecent(): Promise<RecentEntry[]>
   setRecent(items: RecentEntry[]): Promise<void>
+  /** 应用版本号（Electron app.getVersion） */
+  getVersion(): Promise<string>
 }

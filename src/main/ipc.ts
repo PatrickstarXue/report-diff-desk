@@ -188,6 +188,8 @@ export function registerIpc(): void {
     return { canceled: false, path: target }
   })
 
+  ipcMain.handle(IPC.appVersion, (): string => app.getVersion())
+
   ipcMain.handle(IPC.recentGet, async (): Promise<RecentEntry[]> => {
     try {
       const data = JSON.parse(await readFile(recentPath(), 'utf-8'))

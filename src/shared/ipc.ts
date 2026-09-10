@@ -10,5 +10,6 @@ export const IPC = {
   docLibrarySet: 'docLibrary:set',
   exportRun: 'export:run',
   recentGet: 'recent:get',
-  recentSet: 'recent:set'
+  recentSet: 'recent:set',
+  appVersion: 'app:version'
 } as const
