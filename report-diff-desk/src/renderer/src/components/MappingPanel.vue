@@ -87,9 +87,12 @@ function cellBrief(cell: GridCell | null): string {
   return t.length > 60 ? t.slice(0, 57) + '…' : t
 }
 
-function onCellClick(row: { _row: number }, column: { _columnIndex: number }): void {
-  const c = dataCol(column._columnIndex)
-  if (c < 0) return
+function onCellClick(row: { _row: number }, column: { property?: string }): void {
+  // 列 prop 形如 "c0"（数据列索引）；不使用内部 _columnIndex，规避合并列偏移
+  const prop = column?.property
+  if (typeof prop !== 'string' || !prop.startsWith('c')) return
+  const c = Number(prop.slice(1))
+  if (Number.isNaN(c)) return
   const raw = activeSheet.value?.cells[row._row - 1]?.[c] ?? null
   const value = cellText(raw)
   if (!value) return
@@ -182,6 +185,7 @@ async function removeCurrentDoc(): Promise<void> {
           <el-table-column
             v-for="c in gridColCount"
             :key="c"
+            :prop="'c' + (c - 1)"
             :label="colLetters(gridColCount)[c - 1]"
             :min-width="140"
           >
@@ -241,8 +245,12 @@ async function removeCurrentDoc(): Promise<void> {
   min-height: 0;
 }
 .doc-overview {
-  overflow: auto;
+  width: 50%;
   max-height: 55%;
+  overflow: auto;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: #fff;
 }
 .doc-detail {
   flex: 1;
