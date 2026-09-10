@@ -8,24 +8,21 @@ const props = defineProps<{ pairFilter?: number | null }>()
 const emit = defineEmits<{ 'update:pairFilter': [val: number | null] }>()
 
 const session = useSessionStore()
-const sheetFilter = ref('')
 /** null = 全部文件对；由父级（OverviewPanel 联动）外部控制 */
 const pairFilter = computed<number | null>({
   get: () => props.pairFilter ?? null,
   set: (val) => emit('update:pairFilter', val)
 })
 
+type SortOrder = 'descending' | 'ascending' | null
+/** 当前列排序：prop 为空或 order 为 null 表示默认（引擎输出顺序） */
+const sortState = ref<{ prop: string; order: SortOrder }>({ prop: '', order: null })
+
 interface DiffRow {
   pairIndex: number
   pairLabel: string
   diff: CellDiff
 }
-
-const pairOptions = computed(() =>
-  (session.compareResult?.pairs ?? []).map((p, i) => ({ index: i, label: p.pairLabel }))
-)
-
-const sheetOptions = computed(() => session.compareResult?.pairs[pairFilter.value ?? 0]?.compare.sheetsMatched ?? [])
 
 /** 当前显示的文件对列表（真实索引） */
 const visiblePairs = computed(() =>
@@ -36,13 +33,54 @@ const visiblePairs = computed(() =>
 
 const showFileCol = computed(() => pairFilter.value === null && visiblePairs.value.length > 1)
 
-const rows = computed<DiffRow[]>(() =>
-  visiblePairs.value.flatMap(({ p, index }) =>
-    p.compare.diffs
-      .filter((d) => !sheetFilter.value || d.sheet === sheetFilter.value)
-      .map((diff) => ({ pairIndex: index, pairLabel: p.pairLabel, diff }))
+/** 行排序取值：数字列取数值，其余转字符串；空值排最后 */
+function rowValue(row: DiffRow, prop: string): number | string | null {
+  const d = row.diff
+  switch (prop) {
+    case 'pairLabel':
+      return row.pairLabel
+    case 'sheet':
+      return d.sheet
+    case 'ref':
+      return d.ref
+    case 'prevValue':
+      return d.prevNum ?? (d.prevValue === null ? null : String(d.prevValue))
+    case 'currValue':
+      return d.currNum ?? (d.currValue === null ? null : String(d.currValue))
+    case 'changeRate':
+      return d.changeRate ?? 0
+    case 'kind':
+      return KIND_LABEL[d.kind as DiffKind]
+    default:
+      return null
+  }
+}
+
+function compareRows(a: DiffRow, b: DiffRow, prop: string): number {
+  const av = rowValue(a, prop)
+  const bv = rowValue(b, prop)
+  const aEmpty = av === null || av === ''
+  const bEmpty = bv === null || bv === ''
+  if (aEmpty && bEmpty) return 0
+  if (aEmpty) return 1
+  if (bEmpty) return -1
+  if (typeof av === 'number' && typeof bv === 'number') return av - bv
+  return String(av).localeCompare(String(bv), 'zh-CN')
+}
+
+const rows = computed<DiffRow[]>(() => {
+  const list = visiblePairs.value.flatMap(({ p, index }) =>
+    p.compare.diffs.map((diff) => ({ pairIndex: index, pairLabel: p.pairLabel, diff }))
   )
-)
+  const { prop, order } = sortState.value
+  if (!prop || !order) return list // 默认顺序：按引擎输出（sheet → row → col）
+  const dir = order === 'ascending' ? 1 : -1
+  return [...list].sort((a, b) => dir * compareRows(a, b, prop))
+})
+
+function onSortChange({ prop, order }: { prop: string; order: SortOrder }): void {
+  sortState.value = { prop, order }
+}
 
 function rateText(d: CellDiff): string {
   if (d.changeRate === null) return '-'
@@ -65,12 +103,6 @@ function onRowClick(row: DiffRow): void {
 <template>
   <div class="diff-list">
     <div class="diff-toolbar">
-      <el-select v-model="pairFilter" size="small" class="pair-select" placeholder="全部文件" clearable>
-        <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
-      </el-select>
-      <el-select v-model="sheetFilter" size="small" class="sheet-select" placeholder="全部工作表" clearable>
-        <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
-      </el-select>
       <span class="diff-count">共 {{ session.compareResult?.totalDiffs ?? 0 }} 处变动</span>
     </div>
     <el-table
@@ -78,26 +110,35 @@ function onRowClick(row: DiffRow): void {
       size="small"
       height="100%"
       :row-class-name="rowClass"
+      :sort-orders="['descending', 'ascending', null]"
       border
+      @sort-change="onSortChange"
       @row-click="onRowClick"
     >
-      <el-table-column v-if="showFileCol" prop="pairLabel" label="文件" width="220" show-overflow-tooltip />
-      <el-table-column label="工作表" width="130" show-overflow-tooltip>
+      <el-table-column
+        v-if="showFileCol"
+        prop="pairLabel"
+        label="文件"
+        width="220"
+        show-overflow-tooltip
+        sortable="custom"
+      />
+      <el-table-column prop="sheet" label="工作表" width="130" show-overflow-tooltip sortable="custom">
         <template #default="{ row }">{{ row.diff.sheet }}</template>
       </el-table-column>
-      <el-table-column label="坐标" width="80">
+      <el-table-column prop="ref" label="坐标" width="80" sortable="custom">
         <template #default="{ row }">{{ row.diff.ref }}</template>
       </el-table-column>
-      <el-table-column label="上期值" min-width="110">
+      <el-table-column prop="prevValue" label="上期值" min-width="110" sortable="custom">
         <template #default="{ row }">{{ valueText(row.diff.prevValue) }}</template>
       </el-table-column>
-      <el-table-column label="本期值" min-width="110">
+      <el-table-column prop="currValue" label="本期值" min-width="110" sortable="custom">
         <template #default="{ row }">{{ valueText(row.diff.currValue) }}</template>
       </el-table-column>
-      <el-table-column label="变动率" width="100" align="right">
+      <el-table-column prop="changeRate" label="变动率" width="100" align="right" sortable="custom">
         <template #default="{ row }">{{ rateText(row.diff) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="100">
+      <el-table-column prop="kind" label="类型" width="100" sortable="custom">
         <template #default="{ row }">{{ KIND_LABEL[row.diff.kind as DiffKind] }}</template>
       </el-table-column>
     </el-table>
@@ -113,14 +154,7 @@ function onRowClick(row: DiffRow): void {
 .diff-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 8px 0;
-}
-.pair-select {
-  width: 280px;
-}
-.sheet-select {
-  width: 200px;
 }
 .diff-count {
   font-size: 13px;
