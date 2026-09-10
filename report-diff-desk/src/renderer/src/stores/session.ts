@@ -17,8 +17,14 @@ interface SessionState {
   selectedCell: { text: string; sheet: string; ref: string } | null
   /** DiffList 点击行 → 网格跳转目标（含列，用于紫色标记聚焦格） */
   gridFocus: { pairIndex: number; sheet: string; row: number; col: number } | null
-  /** 当前加载的口径文档 */
-  docContent: DocContent | null
+  /** 已加载的口径文档列表（多文档存留） */
+  docList: DocContent[]
+  /** 当前显示的文档索引 */
+  activeDocIndex: number
+  /** 当前报表文档（xlsx/xls）内选中的 sheet 名 */
+  activeDocSheet: string
+  /** 点击整体区单元格选中的内容（报表文档） */
+  selectedDocCell: { sheet: string; row: number; col: number; value: string } | null
   /** 右侧标签页：result | grid | mapping | doc */
   uiTab: string
 }
@@ -36,7 +42,10 @@ export const useSessionStore = defineStore('session', {
     mappingCount: 0,
     selectedCell: null,
     gridFocus: null,
-    docContent: null,
+    docList: [],
+    activeDocIndex: 0,
+    activeDocSheet: '',
+    selectedDocCell: null,
     uiTab: 'grid'
   }),
 
@@ -99,6 +108,29 @@ export const useSessionStore = defineStore('session', {
     selectCell(text: string, sheet: string, ref: string): void {
       this.selectedCell = { text, sheet, ref }
       this.uiTab = 'mapping'
+    },
+
+    /** 加载口径文档并入文档列表（可多次加载并存；报表文档默认选第一个 sheet） */
+    async addDoc(path: string): Promise<void> {
+      const doc = await window.api.loadDoc(path)
+      this.docList.push(doc)
+      this.activeDocIndex = this.docList.length - 1
+      this.activeDocSheet = doc.workbooks?.[0]?.name ?? ''
+      this.selectedDocCell = null
+    },
+
+    /** 切换当前显示文档（不同文档清除已选单元格） */
+    selectDoc(index: number): void {
+      if (index < 0 || index >= this.docList.length) return
+      this.activeDocIndex = index
+      const doc = this.docList[index]
+      this.activeDocSheet = doc.workbooks?.[0]?.name ?? ''
+      this.selectedDocCell = null
+    },
+
+    /** 点击整体区单元格：记录完整内容供局部区展示 */
+    selectDocCell(row: number, col: number, value: string): void {
+      this.selectedDocCell = { sheet: this.activeDocSheet, row, col, value }
     },
 
     /** DiffList 行点击：切到网格并跳转对应文件对/sheet/单元格 */

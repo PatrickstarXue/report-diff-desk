@@ -78,7 +78,7 @@ export interface MappingRows {
   rows: string[][]
 }
 
-export type DocKind = 'docx' | 'pdf' | 'txt'
+export type DocKind = 'docx' | 'pdf' | 'txt' | 'xlsx' | 'xls'
 
 export interface DocContent {
   kind: DocKind
@@ -87,6 +87,8 @@ export interface DocContent {
   html?: string
   /** pdf 逐页文本；txt 为单元素数组 */
   pages?: string[]
+  /** xlsx/xls：全表数据（含 merges） */
+  workbooks?: SheetData[]
 }
 
 // —— 最近记录 ——
