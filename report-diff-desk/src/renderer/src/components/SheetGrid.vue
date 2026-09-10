@@ -40,7 +40,7 @@ const spans = computed(() =>
   sheetData.value ? buildMergeSpans(sheetData.value.merges, sheetData.value.rowCount, sheetData.value.colCount) : null
 )
 
-/** el-table span-method：主格展开，被覆盖格隐藏 */
+/** el-table span-method：主格展开，被覆盖格隐藏；第 0 列是行号列，不参与合并 */
 function spanMethod({
   rowIndex,
   columnIndex
@@ -48,6 +48,7 @@ function spanMethod({
   rowIndex: number
   columnIndex: number
 }): [number, number] {
+  if (columnIndex === 0) return [1, 1]
   const s = spans.value?.[rowIndex]?.[columnIndex]
   if (!s) return [1, 1]
   return [s.rowspan, s.colspan]
