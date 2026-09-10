@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { SheetData } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
@@ -78,6 +78,17 @@ function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: n
   const classes: string[] = []
   const s = spans.value?.[rowIndex]?.[columnIndex]
   if (s && s.rowspan > 0) classes.push('merge-master')
+  // DiffList 跳转聚焦格：紫色标记（优先于 diff-hit）
+  const f = session.gridFocus
+  if (
+    f &&
+    f.pairIndex === session.activePairIndex &&
+    f.sheet === name &&
+    f.row === rowIndex + 1 &&
+    f.col === columnIndex + 1
+  ) {
+    classes.push('cell-focused')
+  }
   if (name && hitSet.value.has(`${name}|${rowIndex + 1}|${columnIndex + 1}`)) classes.push('diff-hit')
   return classes.join(' ')
 }
@@ -105,6 +116,9 @@ async function loadSheet(): Promise<void> {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }
 }
+
+// 离开网格标签页（组件销毁）时清除聚焦格紫色标记
+onUnmounted(() => session.clearGridFocus())
 
 // 切换工作簿（换文件对/换侧）时重置并加载第一个 sheet
 watch(
@@ -168,6 +182,7 @@ watch(
       :span-method="spanMethod"
       @cell-click="onCellClick"
     >
+      <el-table-column type="index" label="行号" width="56" align="right" />
       <el-table-column
         v-for="c in sheetData.colCount"
         :key="c"
@@ -212,6 +227,11 @@ watch(
   background: #ffd6e8 !important;
   font-weight: 600;
   color: #d6336c;
+}
+.sheet-grid .el-table .cell-focused {
+  background: #e6d0f5 !important;
+  color: #6d28d9 !important;
+  font-weight: 700;
 }
 .sheet-grid .el-table .merge-master {
   text-align: center;
