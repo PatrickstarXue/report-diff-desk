@@ -1,45 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import type { DocContent, GridCell } from '@shared/types'
-import { lookup } from '@shared/core/mapping'
+import { computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { GridCell } from '@shared/types'
+import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
-const manualQuery = ref('')
 
-// —— 映射查询（保留现有） ——
+// —— 口径资料（整体 / 局部） ——
 
-const hitResult = computed<{ text: string; desc: string | null } | null>(() => {
-  const cell = session.selectedCell
-  const query = cell?.text ?? ''
-  if (!query || !session.mappingIndex) return null
-  return { text: query, desc: lookup(session.mappingIndex, query) }
-})
-
-const manualResult = computed<string | null>(() => {
-  if (!manualQuery.value || !session.mappingIndex) return null
-  return lookup(session.mappingIndex, manualQuery.value)
-})
-
-async function importMapping(): Promise<void> {
-  const res = await window.api.openFile({ kind: 'mapping', title: '选择口径映射表（两列：指标名、口径说明）' })
-  if (res.canceled || !res.path) return
-  try {
-    await session.loadMappingFile(res.path)
-    ElMessage.success(`已导入 ${session.mappingCount} 条口径`)
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : String(err))
-  }
-}
-
-// —— 口径文档浏览（整体/局部，仅报表 xlsx/xls） ——
-
-/** 文档库中的报表类文档（按全局 docList 索引关联） */
-const reportDocs = computed<{ index: number; doc: DocContent }[]>(() =>
+/** 文档库中的报表类文档（xlsx/xls） */
+const reportDocs = computed<{ index: number; doc: (typeof session.docList)[number] }[]>(() =>
   session.docList
     .map((doc, index) => ({ index, doc }))
-    .filter(({ doc }) => doc.workbooks && doc.kind !== undefined)
+    .filter(({ doc }) => doc.kind === 'xlsx' || doc.kind === 'xls')
 )
 
 const activeReportIndex = computed<number | null>(() => {
@@ -54,13 +28,39 @@ const activeSheet = computed(() => {
   return doc.workbooks.find((s) => s.name === session.activeDocSheet) ?? doc.workbooks[0] ?? null
 })
 
+/** 整体区表格：全量行（不再限制条数） */
 const gridRows = computed(() => {
   const s = activeSheet.value
   if (!s) return []
-  return s.cells.slice(0, 20).map((row, i) => ({ _row: i + 1, cells: row }))
+  return s.cells.map((row, i) => ({ _row: i + 1, cells: row }))
 })
 
 const gridColCount = computed(() => activeSheet.value?.colCount ?? 0)
+
+/** 合并区域 span 矩阵（数据列索引，与 cells 对齐） */
+const spans = computed(() => {
+  const s = activeSheet.value
+  return s ? buildMergeSpans(s.merges, s.rowCount, s.colCount) : null
+})
+
+/** el-table 列序号 → 数据列索引（第 0 列是行号列） */
+function dataCol(columnIndex: number): number {
+  return columnIndex - 1
+}
+
+function spanMethod({
+  rowIndex,
+  columnIndex
+}: {
+  rowIndex: number
+  columnIndex: number
+}): [number, number] {
+  const c = dataCol(columnIndex)
+  if (c < 0) return [1, 1]
+  const s = spans.value?.[rowIndex]?.[c]
+  if (!s) return [1, 1]
+  return [s.rowspan, s.colspan]
+}
 
 function colLetters(colCount: number): string[] {
   const out: string[] = []
@@ -88,16 +88,23 @@ function cellBrief(cell: GridCell | null): string {
 }
 
 function onCellClick(row: { _row: number }, column: { _columnIndex: number }): void {
-  const raw = activeSheet.value?.cells[row._row - 1]?.[column._columnIndex] ?? null
+  const c = dataCol(column._columnIndex)
+  if (c < 0) return
+  const raw = activeSheet.value?.cells[row._row - 1]?.[c] ?? null
   const value = cellText(raw)
   if (!value) return
-  session.selectDocCell(row._row, column._columnIndex + 1, value)
+  session.selectDocCell(row._row, c + 1, value)
 }
 
 function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }): string {
+  const c = dataCol(columnIndex)
+  if (c < 0) return ''
+  const classes: string[] = []
+  const s = spans.value?.[rowIndex]?.[c]
+  if (s && s.rowspan > 0) classes.push('merge-master')
   const sel = session.selectedDocCell
-  if (sel && sel.row === rowIndex + 1 && sel.col === columnIndex + 1) return 'doc-cell-selected'
-  return ''
+  if (sel && sel.row === rowIndex + 1 && sel.col === c + 1) classes.push('doc-cell-selected')
+  return classes.join(' ')
 }
 
 async function addDoc(): Promise<void> {
@@ -112,6 +119,19 @@ async function addDoc(): Promise<void> {
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }
+}
+
+async function removeCurrentDoc(): Promise<void> {
+  const idx = activeReportIndex.value
+  if (idx === null) return
+  const name = session.docList[idx]?.name ?? ''
+  try {
+    await ElMessageBox.confirm(`确定删除口径资料「${name}」？`, '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  session.removeDoc(idx)
+  ElMessage.success('已删除')
 }
 </script>
 
@@ -143,21 +163,19 @@ async function addDoc(): Promise<void> {
           :value="s.name"
         />
       </el-select>
-      <el-button size="small" @click="importMapping">导入映射表</el-button>
-      <span v-if="session.mappingCount" class="mapping-count">
-        已收录 {{ session.mappingCount }} 条口径
-      </span>
+      <el-button v-if="activeReportIndex !== null" size="small" type="danger" plain @click="removeCurrentDoc">
+        删除当前资料
+      </el-button>
     </div>
 
-    <template v-if="reportDocs.length">
-      <el-divider content-position="left">口径资料（整体 / 局部）</el-divider>
-      <div v-if="gridRows.length" class="doc-overview">
+    <div v-if="activeSheet" class="doc-browser">
+      <div class="doc-overview">
         <el-table
           :data="gridRows"
           size="small"
           border
-          height="220px"
           :cell-class-name="cellClass"
+          :span-method="spanMethod"
           @cell-click="onCellClick"
         >
           <el-table-column type="index" label="" width="56" align="right" class-name="row-number-col" />
@@ -170,9 +188,6 @@ async function addDoc(): Promise<void> {
             <template #default="{ row }">{{ cellBrief(row.cells[c - 1]) }}</template>
           </el-table-column>
         </el-table>
-      </div>
-      <div v-else class="doc-overview">
-        <el-empty description="该工作表没有内容" />
       </div>
 
       <div class="doc-detail">
@@ -190,50 +205,11 @@ async function addDoc(): Promise<void> {
           title="点击上方整体区中的单元格，查看完整内容"
         />
       </div>
-    </template>
-
-    <el-divider content-position="left">单元格查询</el-divider>
-    <div v-if="session.selectedCell" class="cell-query">
-      <div class="cell-info">
-        来源：{{ session.selectedCell.sheet }} {{ session.selectedCell.ref }}，文本「{{ session.selectedCell.text || '（空）' }}」
-      </div>
-      <div v-if="hitResult?.desc" class="hit-desc">
-        <div class="hit-name">{{ hitResult.text }}</div>
-        <div class="hit-body">{{ hitResult.desc }}</div>
-      </div>
-      <el-alert
-        v-else-if="hitResult"
-        type="info"
-        :closable="false"
-        title="该单元格文本未在映射表中收录"
-      />
-      <el-alert
-        v-else
-        type="info"
-        :closable="false"
-        title="点击网格中的单元格，或先导入映射表"
-      />
     </div>
 
-    <el-divider content-position="left">手动查询</el-divider>
-    <div class="manual-row">
-      <el-input
-        v-model="manualQuery"
-        size="small"
-        class="manual-input"
-        placeholder="手动输入指标名查询"
-        clearable
-      />
-    </div>
-    <div v-if="manualResult" class="hit-desc">
-      <div class="hit-name">{{ manualQuery }}</div>
-      <div class="hit-body">{{ manualResult }}</div>
-    </div>
-    <el-alert
-      v-else-if="manualQuery && session.mappingIndex"
-      type="info"
-      :closable="false"
-      title="未命中，请检查指标名写法"
+    <el-empty
+      v-else
+      :description="reportDocs.length ? '选择一份报表文档查看' : '打开口径资料（Excel 报表 / Word / PDF / TXT）'"
     />
   </div>
 </template>
@@ -250,6 +226,7 @@ async function addDoc(): Promise<void> {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 .doc-select {
   width: 240px;
@@ -257,17 +234,21 @@ async function addDoc(): Promise<void> {
 .sheet-select {
   width: 150px;
 }
-.mapping-count {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
+.doc-browser {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 .doc-overview {
-  margin-bottom: 8px;
+  overflow: auto;
+  max-height: 55%;
 }
 .doc-detail {
   flex: 1;
+  min-height: 0;
   overflow: auto;
-  min-height: 80px;
+  margin-top: 8px;
 }
 .cell-full {
   border: 1px solid var(--el-border-color);
@@ -288,40 +269,17 @@ async function addDoc(): Promise<void> {
   word-break: break-all;
   margin: 0;
 }
-.cell-query {
-  margin-bottom: 8px;
-}
-.cell-info {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 8px;
-}
-.hit-desc {
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
-  padding: 10px;
-}
-.hit-name {
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.hit-body {
-  font-size: 13px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-.manual-row {
-  margin-bottom: 8px;
-}
-.manual-input {
-  width: 260px;
-}
 </style>
 
 <style>
 .mapping-panel .el-table .row-number-col {
   background: #f5f7fa;
   color: #909399;
+}
+.mapping-panel .el-table .merge-master {
+  text-align: center;
+  font-weight: 600;
+  vertical-align: middle;
 }
 .mapping-panel .el-table .doc-cell-selected {
   background: #d6e4ff !important;
