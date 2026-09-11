@@ -26,12 +26,15 @@ interface PageBox {
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 let highlights: PageBox[] = []
 let disposed = false
+let renderToken = 0
 
+/** 加载文档（仅首次或 pdfBase64 变化时调用），加载后渲染全部页 */
 async function loadPdf(): Promise<void> {
-  if (!containerRef.value) return
+  const container = containerRef.value
+  if (!container) return
   pdfDoc?.destroy().catch(() => {})
   pdfDoc = null
-  containerRef.value.innerHTML = ''
+  container.innerHTML = ''
   highlights = []
   currentPage.value = 0
   totalPages.value = 0
@@ -46,21 +49,44 @@ async function loadPdf(): Promise<void> {
   }
   pdfDoc = doc
   totalPages.value = doc.numPages
+  await renderAllPages()
+}
 
-  for (let i = 1; i <= doc.numPages; i++) {
-    if (disposed) break
-    const page = await doc.getPage(i)
+/**
+ * 用现有 pdfDoc 渲染/重绘全部页。缩放时保留 DOM 节点原地重绘（不重建、不闪空白）；
+ * 仅页面数与已渲染不一致时才重建容器。
+ */
+async function renderAllPages(): Promise<void> {
+  const container = containerRef.value
+  if (!container || !pdfDoc) return
+  const token = ++renderToken
+  clearHighlights()
+  highlights = []
+
+  let wraps = Array.from(container.querySelectorAll<HTMLElement>('.pdf-page-wrap'))
+  if (wraps.length !== pdfDoc.numPages) {
+    container.innerHTML = ''
+    wraps = []
+    for (let i = 0; i < pdfDoc.numPages; i++) {
+      const wrap = document.createElement('div')
+      wrap.className = 'pdf-page-wrap'
+      const canvas = document.createElement('canvas')
+      wrap.appendChild(canvas)
+      container.appendChild(wrap)
+      wraps.push(wrap)
+    }
+  }
+
+  for (let i = 0; i < pdfDoc.numPages; i++) {
+    if (disposed || token !== renderToken) break
+    const page = await pdfDoc.getPage(i + 1)
     const viewport = page.getViewport({ scale: scale.value })
-    const wrap = document.createElement('div')
-    wrap.className = 'pdf-page-wrap'
-    const canvas = document.createElement('canvas')
+    const wrap = wraps[i]
+    const canvas = wrap.querySelector('canvas')!
     canvas.width = Math.floor(viewport.width)
     canvas.height = Math.floor(viewport.height)
     canvas.style.width = `${Math.floor(viewport.width)}px`
     canvas.style.height = `${Math.floor(viewport.height)}px`
-    wrap.appendChild(canvas)
-    containerRef.value.appendChild(wrap)
-
     const ctx = canvas.getContext('2d')
     if (ctx) {
       try {
@@ -74,7 +100,6 @@ async function loadPdf(): Promise<void> {
       .map((it: unknown) => it as { str: string; transform: number[]; width?: number; height?: number })
       .filter((it) => it.str && it.str.trim())
 
-    // 渲染时记录文本项坐标（供搜索高亮），并把坐标转成相对容器像素
     wrap.dataset['pageItems'] = JSON.stringify(
       items.map((it) => {
         const [tx, ty] = [it.transform[4], it.transform[5]]
@@ -141,19 +166,11 @@ function jumpTo(pageIndex: number): void {
   const wraps = container.querySelectorAll<HTMLElement>('.pdf-page-wrap')
   const wrap = wraps[pageIndex]
   if (wrap) {
-    // 只滚动 PDF 内容框，避免 scrollIntoView 把左侧菜单/工具栏等祖先一起滚上去
     const top =
       wrap.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
     container.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' })
     currentPage.value = pageIndex + 1
   }
-}
-
-function changeScale(delta: number): void {
-  const next = Math.min(3, Math.max(0.6, scale.value + delta))
-  if (next === scale.value) return
-  scale.value = next
-  void loadPdf()
 }
 
 function onScroll(): void {
@@ -171,6 +188,17 @@ function onScroll(): void {
     }
   }
 }
+
+function changeScale(delta: number): void {
+  const next = Math.min(3, Math.max(0.6, scale.value + delta))
+  if (next === scale.value) return
+  scale.value = next
+}
+
+// 缩放变化：复用已加载文档原地重绘（不再销毁重建，避免首帧空白）
+watch(scale, () => {
+  if (pdfDoc) void renderAllPages()
+})
 
 watch(() => props.pdfBase64, () => void loadPdf())
 watch(keyword, () => void runSearch())
