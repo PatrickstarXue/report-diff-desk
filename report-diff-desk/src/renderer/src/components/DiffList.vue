@@ -103,7 +103,7 @@ function onRowClick(row: DiffRow): void {
 <template>
   <div class="diff-list">
     <div class="diff-toolbar">
-      <span class="diff-count">共 {{ session.compareResult?.totalDiffs ?? 0 }} 处变动</span>
+      <span v-if="session.compareResult" class="diff-count">共 {{ session.compareResult.totalDiffs }} 处变动</span>
     </div>
     <el-table
       :data="rows"

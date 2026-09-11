@@ -188,6 +188,7 @@ watch(
   <div class="sheet-grid">
     <div class="grid-toolbar">
       <el-select
+        v-if="pairOptions.length"
         v-model="session.activePairIndex"
         size="small"
         class="pair-select"
