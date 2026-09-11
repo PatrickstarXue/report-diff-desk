@@ -2,6 +2,7 @@
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSessionStore } from '../stores/session'
+import PdfViewer from './PdfViewer.vue'
 
 const session = useSessionStore()
 
@@ -15,22 +16,6 @@ const activePdfIndex = ref<number | null>(null)
 const doc = computed(() => {
   if (activePdfIndex.value === null) return null
   return session.docList[activePdfIndex.value] ?? null
-})
-
-// blob URL 管理：Chromium 内置 PDF 查看器，比纯文本分页直观
-const pdfBlobUrl = ref<string | null>(null)
-
-watch(doc, (d) => {
-  if (pdfBlobUrl.value) URL.revokeObjectURL(pdfBlobUrl.value)
-  pdfBlobUrl.value = null
-  if (d?.pdfBase64) {
-    const bytes = Uint8Array.from(atob(d.pdfBase64), (c) => c.charCodeAt(0))
-    pdfBlobUrl.value = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
-  }
-})
-
-onUnmounted(() => {
-  if (pdfBlobUrl.value) URL.revokeObjectURL(pdfBlobUrl.value)
 })
 
 // 同步当前 PDF 到文档库 activeDocIndex（不影响口径查询页）
@@ -71,11 +56,13 @@ async function removeCurrent(): Promise<void> {
   } catch {
     return
   }
-  if (pdfBlobUrl.value) URL.revokeObjectURL(pdfBlobUrl.value)
-  pdfBlobUrl.value = null
   session.removeDoc(idx)
   ElMessage.success('已删除')
 }
+
+onUnmounted(() => {
+  // 无额外清理：PdfViewer 自行释放 pdfjs 资源
+})
 </script>
 
 <template>
@@ -97,10 +84,7 @@ async function removeCurrent(): Promise<void> {
       </el-button>
     </div>
 
-    <!-- PDF：Chromium 内置查看器，支持翻页/缩放/搜索，最直观 -->
-    <div v-if="pdfBlobUrl" class="doc-frame-wrap">
-      <iframe class="doc-pdf-frame" :src="pdfBlobUrl" />
-    </div>
+    <PdfViewer v-if="doc?.kind === 'pdf'" :pdf-base64="doc.pdfBase64" />
     <el-empty
       v-else
       :description="pdfDocs.length ? '选择一份 PDF 文档' : '打开口径 PDF，重启后仍会保留'"
@@ -122,17 +106,5 @@ async function removeCurrent(): Promise<void> {
 }
 .doc-select {
   width: 260px;
-}
-.doc-frame-wrap {
-  flex: 1;
-  min-height: 0;
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.doc-pdf-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
 }
 </style>
