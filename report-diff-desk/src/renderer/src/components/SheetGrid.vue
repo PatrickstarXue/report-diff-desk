@@ -242,8 +242,8 @@ watch(
     >
       <div class="ctx-item" @click="jumpFromMenu">查看该单元格口径</div>
     </div>
-    <el-empty v-else-if="!session.compareResult" description="请先比对" />
-    <el-empty v-else description="选择文件对查看网格" />
+    <el-empty v-else-if="!session.compareResult" description="请上传报表后比对" />
+    <el-empty v-else description="请上传报表后比对" />
   </div>
 </template>
 
