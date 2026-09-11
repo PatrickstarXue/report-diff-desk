@@ -212,6 +212,7 @@ onUnmounted(() => {
 .pdf-container {
   flex: 1;
   min-height: 0;
+  height: calc(100vh - 170px);
   overflow: auto;
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
