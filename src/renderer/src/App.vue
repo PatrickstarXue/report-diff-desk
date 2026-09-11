@@ -66,7 +66,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
         </el-button>
       </div>
     </el-header>
-    <el-container>
+    <el-container class="app-body">
       <el-aside width="260px" class="app-aside">
         <div class="app-aside-body">
           <FilePanel />
@@ -110,6 +110,7 @@ body {
 }
 .app-root {
   height: 100vh;
+  overflow: hidden;
 }
 .app-header {
   display: flex;
@@ -145,8 +146,16 @@ body {
   text-align: center;
 }
 .app-main {
-  padding: 12px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
+  padding: 12px;
+}
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 .app-tabs {
   height: 100%;
