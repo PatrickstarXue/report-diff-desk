@@ -136,10 +136,15 @@ function clearHighlights(): void {
 }
 
 function jumpTo(pageIndex: number): void {
-  const wraps = containerRef.value?.querySelectorAll<HTMLElement>('.pdf-page-wrap') ?? []
+  const container = containerRef.value
+  if (!container) return
+  const wraps = container.querySelectorAll<HTMLElement>('.pdf-page-wrap')
   const wrap = wraps[pageIndex]
   if (wrap) {
-    wrap.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // 只滚动 PDF 内容框，避免 scrollIntoView 把左侧菜单/工具栏等祖先一起滚上去
+    const top =
+      wrap.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+    container.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' })
     currentPage.value = pageIndex + 1
   }
 }
@@ -152,11 +157,15 @@ function changeScale(delta: number): void {
 }
 
 function onScroll(): void {
-  const wraps = containerRef.value?.querySelectorAll<HTMLElement>('.pdf-page-wrap') ?? []
+  const container = containerRef.value
+  if (!container) return
+  const wraps = container.querySelectorAll<HTMLElement>('.pdf-page-wrap')
   if (!wraps.length) return
-  const mid = containerRef.value!.scrollTop + containerRef.value!.clientHeight / 2
+  const cTop = container.getBoundingClientRect().top
+  const mid = cTop + container.clientHeight / 2
   for (let i = 0; i < wraps.length; i++) {
-    if (wraps[i].offsetTop <= mid && (i === wraps.length - 1 || wraps[i + 1].offsetTop > mid)) {
+    const top = wraps[i].getBoundingClientRect().top
+    if (top <= mid && (i === wraps.length - 1 || wraps[i + 1].getBoundingClientRect().top > mid)) {
       currentPage.value = i + 1
       break
     }
