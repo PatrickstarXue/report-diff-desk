@@ -85,6 +85,8 @@ export interface DocContent {
   name: string
   /** 来源文件路径（持久化文档库恢复用） */
   path: string
+  /** pdf：原始文件 base64，renderer 端转 blob 用内置查看器展示 */
+  pdfBase64?: string
   /** docx：mammoth 输出的 HTML */
   html?: string
   /** pdf 逐页文本；txt 为单元素数组 */

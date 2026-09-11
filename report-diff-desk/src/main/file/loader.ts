@@ -3,9 +3,6 @@ import { extname } from 'path'
 import type { DocContent, WorkbookData } from '@shared/types'
 import { parseExcel } from './excel'
 import { parseZip } from './zip'
-import { parseDocx } from './docx'
-import { parsePdf } from './pdf'
-import { parseTxt } from './txt'
 import { putWorkbook } from '../store'
 
 /** 按扩展名分发解析报表文件（单 Excel 或 zip 包），结果写入会话缓存 */
@@ -23,15 +20,15 @@ export async function loadReportFile(path: string): Promise<WorkbookData[]> {
   throw new Error(`暂不支持的报表格式：${ext || '(无扩展名)'}`)
 }
 
-/** 按扩展名分发解析口径文档（Word/PDF/TXT/Excel 报表） */
+/** 按扩展名分发解析口径文档（PDF / Excel 报表）；旧版 docx/txt 已移除 */
 export async function loadDocFile(path: string): Promise<DocContent> {
   const buf = await readFile(path)
   const ext = extname(path).toLowerCase()
   const name = path.split(/[\\/]/).pop() ?? path
 
-  if (ext === '.docx') return { kind: 'docx', path, name, html: await parseDocx(buf) }
-  if (ext === '.pdf') return { kind: 'pdf', path, name, pages: await parsePdf(buf) }
-  if (ext === '.txt') return { kind: 'txt', path, name, pages: await parseTxt(buf) }
+  if (ext === '.pdf') {
+    return { kind: 'pdf', path, name, pdfBase64: buf.toString('base64') }
+  }
   if (ext === '.xlsx' || ext === '.xls') {
     const wb = parseExcel(buf, name, 'file')
     return {
@@ -41,5 +38,7 @@ export async function loadDocFile(path: string): Promise<DocContent> {
       workbooks: wb.sheetNames.map((n) => wb.sheets[n])
     }
   }
-  throw new Error(`暂不支持的口径文档格式：${ext || '(无扩展名)'}（旧版 .doc 请另存为 .docx）`)
+  throw new Error(
+    `暂不支持的口径文档格式：${ext || '(无扩展名)'}（仅支持 PDF；Word/TXT 请转 PDF；报表请在口径查询页打开）`
+  )
 }
