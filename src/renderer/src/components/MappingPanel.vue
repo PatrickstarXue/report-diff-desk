@@ -9,9 +9,13 @@ import ResizeBar from './ResizeBar.vue'
 const session = useSessionStore()
 const overviewRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
 const overviewHeight = ref(Math.floor(window.innerHeight * 0.5))
+let resizeStartH = Math.floor(window.innerHeight * 0.5)
 
+function onOverviewResizeStart(): void {
+  resizeStartH = overviewHeight.value
+}
 function onOverviewResize(deltaY: number): void {
-  overviewHeight.value = Math.max(120, overviewHeight.value + deltaY)
+  overviewHeight.value = Math.max(120, resizeStartH + deltaY)
 }
 
 // 网格跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
@@ -213,7 +217,7 @@ async function removeCurrentDoc(): Promise<void> {
         </el-table>
       </div>
 
-      <ResizeBar @drag="onOverviewResize" />
+      <ResizeBar @start="onOverviewResizeStart" @drag="onOverviewResize" />
 
       <div class="doc-detail">
         <div v-if="session.selectedDocCell" class="cell-full">

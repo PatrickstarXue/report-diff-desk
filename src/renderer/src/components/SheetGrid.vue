@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { SheetData } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
@@ -11,8 +11,9 @@ const session = useSessionStore()
 const side = ref<'base' | 'curr'>('curr')
 const sheetName = ref('')
 const sheetData = ref<SheetData | null>(null)
-const gridRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
+const gridRef = ref<{ scrollTo: (o: { top: number }) => void; doLayout: () => void } | null>(null)
 const tableHeight = ref(400)
+let resizeStartH = 400
 
 const pairOptions = computed(() =>
   (session.compareResult?.pairs ?? []).map((p, i) => ({ index: i, label: p.pairLabel }))
@@ -132,8 +133,12 @@ function jumpFromMenu(): void {
   session.selectCell(text, sheetName.value, `${letters[c] ?? ''}${r}`, r, c + 1, workbook.value?.fileName ?? '')
 }
 
+function onTableResizeStart(): void {
+  resizeStartH = tableHeight.value
+}
 function onTableResize(deltaY: number): void {
-  tableHeight.value = Math.max(120, tableHeight.value + deltaY)
+  tableHeight.value = Math.max(120, resizeStartH + deltaY)
+  nextTick(() => gridRef.value?.doLayout())
 }
 
 // 全局单击任意位置关闭右键菜单
@@ -213,7 +218,7 @@ watch(
       </el-select>
       <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
     </div>
-    <ResizeBar @drag="onTableResize" />
+    <ResizeBar @start="onTableResizeStart" @drag="onTableResize" />
     <el-table
       v-if="sheetData"
       ref="gridRef"
