@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import type { SheetData } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
+import ResizeBar from './ResizeBar.vue'
 
 const session = useSessionStore()
 
@@ -11,6 +12,7 @@ const side = ref<'base' | 'curr'>('curr')
 const sheetName = ref('')
 const sheetData = ref<SheetData | null>(null)
 const gridRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
+const tableHeight = ref(400)
 
 const pairOptions = computed(() =>
   (session.compareResult?.pairs ?? []).map((p, i) => ({ index: i, label: p.pairLabel }))
@@ -130,6 +132,10 @@ function jumpFromMenu(): void {
   session.selectCell(text, sheetName.value, `${letters[c] ?? ''}${r}`, r, c + 1, workbook.value?.fileName ?? '')
 }
 
+function onTableResize(deltaY: number): void {
+  tableHeight.value = Math.max(120, tableHeight.value + deltaY)
+}
+
 // 全局单击任意位置关闭右键菜单
 onMounted(() => document.addEventListener('click', closeCtxMenu))
 
@@ -207,13 +213,14 @@ watch(
       </el-select>
       <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
     </div>
+    <ResizeBar @drag="onTableResize" />
     <el-table
       v-if="sheetData"
       ref="gridRef"
       :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
       size="small"
       border
-      height="100%"
+      :height="tableHeight"
       :cell-class-name="cellClass"
       :span-method="spanMethod"
       @cell-contextmenu="onCellContextMenu"

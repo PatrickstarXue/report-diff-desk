@@ -4,9 +4,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { GridCell } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
+import ResizeBar from './ResizeBar.vue'
 
 const session = useSessionStore()
 const overviewRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
+const overviewHeight = ref(Math.floor(window.innerHeight * 0.5))
+
+function onOverviewResize(deltaY: number): void {
+  overviewHeight.value = Math.max(120, overviewHeight.value + deltaY)
+}
 
 // 网格跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
 watch(
@@ -184,7 +190,7 @@ async function removeCurrentDoc(): Promise<void> {
     </div>
 
     <div v-if="activeSheet" class="doc-browser">
-      <div class="doc-overview">
+      <div class="doc-overview" :style="{ height: overviewHeight + 'px' }">
         <el-table
           ref="overviewRef"
           :data="gridRows"
@@ -206,6 +212,8 @@ async function removeCurrentDoc(): Promise<void> {
           </el-table-column>
         </el-table>
       </div>
+
+      <ResizeBar @drag="onOverviewResize" />
 
       <div class="doc-detail">
         <div v-if="session.selectedDocCell" class="cell-full">
@@ -266,7 +274,6 @@ async function removeCurrentDoc(): Promise<void> {
   min-height: 0;
 }
 .doc-overview {
-  height: 50vh;
   overflow: auto;
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
@@ -276,7 +283,6 @@ async function removeCurrentDoc(): Promise<void> {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  margin-top: 8px;
 }
 .cell-full {
   border: 1px solid var(--el-border-color);
