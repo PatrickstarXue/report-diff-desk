@@ -218,7 +218,6 @@ watch(
       </el-select>
       <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
     </div>
-    <ResizeBar @start="onTableResizeStart" @drag="onTableResize" />
     <el-table
       v-if="sheetData"
       ref="gridRef"
@@ -249,9 +248,10 @@ watch(
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
+    <ResizeBar v-if="sheetData" @start="onTableResizeStart" @drag="onTableResize" />
     <el-empty v-else-if="!session.compareResult" description="请上传报表后比对" />
     <el-empty v-else description="请上传报表后比对" />
-    <!-- 右键菜单：查看该单元格口径 -->
+    <!-- 右键菜单 -->
     <div
       v-if="ctxMenu"
       class="sheet-ctx-menu"
