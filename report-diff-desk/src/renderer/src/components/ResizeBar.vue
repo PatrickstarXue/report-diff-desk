@@ -1,13 +1,12 @@
 <script setup lang="ts">
-const emit = defineEmits<{ drag: [deltaY: number] }>()
+const emit = defineEmits<{ start: []; drag: [deltaY: number] }>()
 
 function onDrag(event: MouseEvent): void {
   event.preventDefault()
+  emit('start')
   const startY = event.clientY
-  const onMove = (e: MouseEvent) => {
-    emit('drag', e.clientY - startY)
-  }
   const body = document.body
+  const onMove = (e: MouseEvent) => emit('drag', e.clientY - startY)
   const onUp = () => {
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
