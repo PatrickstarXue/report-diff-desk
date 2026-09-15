@@ -187,6 +187,7 @@ watch(
 <template>
   <div class="sheet-grid">
     <div class="grid-toolbar">
+      <span v-if="pairOptions.length" class="grid-hint">文件对：</span>
       <el-select
         v-if="pairOptions.length"
         v-model="session.activePairIndex"
@@ -196,6 +197,7 @@ watch(
       >
         <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
       </el-select>
+      <span v-else class="grid-placeholder">请上传报表后比对</span>
       <el-radio-group v-model="side" size="small">
         <el-radio-button value="curr">本期</el-radio-button>
         <el-radio-button value="base">上期</el-radio-button>
@@ -267,6 +269,10 @@ watch(
   width: 180px;
 }
 .grid-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.grid-placeholder {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
