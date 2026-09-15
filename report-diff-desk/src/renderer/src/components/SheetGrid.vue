@@ -219,14 +219,13 @@ watch(
       <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
     </div>
     <ResizeBar @start="onTableResizeStart" @drag="onTableResize" />
-    <el-table
-      v-if="sheetData"
-      ref="gridRef"
-      :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
-      size="small"
-      border
-      :height="tableHeight"
-      :cell-class-name="cellClass"
+    <div v-if="sheetData" class="table-wrap" :style="{ height: tableHeight + 'px' }">
+      <el-table
+        ref="gridRef"
+        :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
+        size="small"
+        border
+        :cell-class-name="cellClass"
       :span-method="spanMethod"
       @cell-contextmenu="onCellContextMenu"
     >
@@ -249,6 +248,7 @@ watch(
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
+    </div>
     <!-- 右键菜单：查看该单元格口径 -->
     <div
       v-if="ctxMenu"
@@ -287,6 +287,9 @@ watch(
 .grid-placeholder {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.table-wrap {
+  overflow: auto;
 }
 </style>
 
