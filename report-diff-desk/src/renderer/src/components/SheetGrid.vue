@@ -219,13 +219,14 @@ watch(
       <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
     </div>
     <ResizeBar @start="onTableResizeStart" @drag="onTableResize" />
-    <div v-if="sheetData" class="table-wrap" :style="{ height: tableHeight + 'px' }">
-      <el-table
-        ref="gridRef"
-        :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
-        size="small"
-        border
-        :cell-class-name="cellClass"
+    <el-table
+      v-if="sheetData"
+      ref="gridRef"
+      :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
+      size="small"
+      border
+      :height="tableHeight"
+      :cell-class-name="cellClass"
       :span-method="spanMethod"
       @cell-contextmenu="onCellContextMenu"
     >
@@ -248,7 +249,8 @@ watch(
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
-    </div>
+    <el-empty v-else-if="!session.compareResult" description="请上传报表后比对" />
+    <el-empty v-else description="请上传报表后比对" />
     <!-- 右键菜单：查看该单元格口径 -->
     <div
       v-if="ctxMenu"
@@ -257,8 +259,6 @@ watch(
     >
       <div class="ctx-item" @click="jumpFromMenu">查看该单元格口径</div>
     </div>
-    <el-empty v-else-if="!session.compareResult" description="请上传报表后比对" />
-    <el-empty v-else description="请上传报表后比对" />
   </div>
 </template>
 
