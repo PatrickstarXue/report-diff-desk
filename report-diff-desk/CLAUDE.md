@@ -39,7 +39,7 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 
 ## 测试
 
-vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export），共约 65 个用例。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）。
+vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export），共 70 个用例（68 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）。
 
 ## 类型注意
 
