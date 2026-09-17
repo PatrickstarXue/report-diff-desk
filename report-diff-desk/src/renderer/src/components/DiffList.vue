@@ -92,7 +92,7 @@ function rowClass({ row }: { row: DiffRow }): string {
 }
 
 function valueText(v: CellDiff['prevValue']): string {
-  return v === null || v === '' ? '（空）' : String(v)
+  return v === null || v === '' ? '0' : String(v)
 }
 
 function onRowClick(row: DiffRow): void {
