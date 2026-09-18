@@ -53,7 +53,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           :disabled="!session.compareResult"
           @click="exportResult('excel')"
         >
-          导出 zip（Excel 原格式 + 紫色标记）
+          导出网格高亮zip（Excel 原格式 + 紫色标记）
         </el-button>
         <el-button
           size="small"
@@ -62,7 +62,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           :disabled="!session.compareResult"
           @click="exportResult('html')"
         >
-          导出 HTML
+          导出对比结果HTML
         </el-button>
       </div>
     </el-header>
@@ -107,6 +107,12 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
 <style>
 body {
   margin: 0;
+}
+/* 拖拽平移进行中：全局抓手光标并禁止选中文本 */
+body.is-panning,
+body.is-panning * {
+  cursor: grabbing !important;
+  user-select: none !important;
 }
 .app-root {
   height: 100vh;

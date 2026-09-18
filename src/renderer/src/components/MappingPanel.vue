@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { GridCell } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
+import { useDragPan } from '../utils/dragPan'
 import ResizeBar from './ResizeBar.vue'
 
 const session = useSessionStore()
-const overviewRef = ref<{ scrollTo: (o: { top: number }) => void } | null>(null)
+/** 整体浏览区：滚动容器是这层 div（el-table 未设 height，内部 scrollbar 不溢出） */
+const overviewRef = ref<HTMLElement | null>(null)
+
+// —— 左键拖拽平移（Ctrl+左键保留原生文本选择） ——
+const { dragging, onMouseDown: startPan } = useDragPan(() => overviewRef.value)
 const overviewHeight = ref(Math.floor(window.innerHeight * 0.5))
 let resizeStartH = Math.floor(window.innerHeight * 0.5)
 
@@ -110,6 +115,7 @@ function cellBrief(cell: GridCell | null): string {
 }
 
 function onCellClick(row: { _row: number }, column: { property?: string }): void {
+  if (dragging.value) return // 拖拽平移结束的这次点击不应选中单元格
   // 列 prop 形如 "c0"（数据列索引）；不使用内部 _columnIndex，规避合并列偏移
   const prop = column?.property
   if (typeof prop !== 'string' || !prop.startsWith('c')) return
@@ -120,6 +126,48 @@ function onCellClick(row: { _row: number }, column: { property?: string }): void
   if (!value) return
   session.selectDocCell(row._row, c + 1, value)
 }
+
+// —— 右键菜单：复制该单元格数值 ——
+
+const ctxMenu = ref<{ row: number; col: number; x: number; y: number } | null>(null)
+
+function closeCtxMenu(): void {
+  ctxMenu.value = null
+}
+
+function onCellContextMenu(
+  row: { _row: number },
+  column: { property?: string },
+  _cell: unknown,
+  event: MouseEvent
+): void {
+  const prop = column?.property
+  if (typeof prop !== 'string' || !prop.startsWith('c')) return
+  const c = Number(prop.slice(1))
+  if (Number.isNaN(c)) return
+  event.preventDefault()
+  ctxMenu.value = { row: row._row, col: c + 1, x: event.clientX, y: event.clientY }
+}
+
+async function copyFromMenu(): Promise<void> {
+  const m = ctxMenu.value
+  if (!m) return
+  closeCtxMenu()
+  const text = cellText(activeSheet.value?.cells[m.row - 1]?.[m.col - 1] ?? null)
+  if (!text) {
+    ElMessage.warning('该单元格为空')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制单元格数值')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
+
+onMounted(() => document.addEventListener('click', closeCtxMenu))
+onUnmounted(() => document.removeEventListener('click', closeCtxMenu))
 
 function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }): string {
   const c = dataCol(columnIndex)
@@ -194,15 +242,20 @@ async function removeCurrentDoc(): Promise<void> {
     </div>
 
     <div v-if="activeSheet" class="doc-browser">
-      <div class="doc-overview" :style="{ height: overviewHeight + 'px' }">
+      <div
+        ref="overviewRef"
+        class="doc-overview"
+        :style="{ height: overviewHeight + 'px' }"
+        @mousedown="startPan"
+      >
         <el-table
-          ref="overviewRef"
           :data="gridRows"
           size="small"
           border
           :cell-class-name="cellClass"
           :span-method="spanMethod"
           @cell-click="onCellClick"
+          @cell-contextmenu="onCellContextMenu"
         >
           <el-table-column type="index" label="" width="56" align="right" class-name="row-number-col" />
           <el-table-column
@@ -248,6 +301,14 @@ async function removeCurrentDoc(): Promise<void> {
       v-else
       :description="reportDocs.length ? '选择一份报表文档查看' : '打开口径资料（Excel 报表 / Word / PDF / TXT）'"
     />
+    <!-- 右键菜单 -->
+    <div
+      v-if="ctxMenu"
+      class="mapping-ctx-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+    >
+      <div class="ctx-item" @click="copyFromMenu">复制单元格数值</div>
+    </div>
   </div>
 </template>
 
@@ -279,6 +340,7 @@ async function removeCurrentDoc(): Promise<void> {
 }
 .doc-overview {
   overflow: auto;
+  cursor: grab; /* 左键拖拽平移 */
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   background: #fff;
@@ -306,6 +368,26 @@ async function removeCurrentDoc(): Promise<void> {
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
+}
+.mapping-ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  background: #fff;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+  min-width: 160px;
+}
+.mapping-ctx-menu .ctx-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mapping-ctx-menu .ctx-item:hover {
+  background: #f5f7fa;
+  color: #409eff;
 }
 </style>
 
