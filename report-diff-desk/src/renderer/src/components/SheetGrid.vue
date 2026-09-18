@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import type { SheetData } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
 import { useSessionStore } from '../stores/session'
+import { useDragPan } from '../utils/dragPan'
 import ResizeBar from './ResizeBar.vue'
 
 const session = useSessionStore()
@@ -11,7 +12,11 @@ const session = useSessionStore()
 const side = ref<'base' | 'curr'>('curr')
 const sheetName = ref('')
 const sheetData = ref<SheetData | null>(null)
-const gridRef = ref<{ scrollTo: (o: { top: number }) => void; doLayout: () => void } | null>(null)
+const gridRef = ref<{
+  $el: HTMLElement
+  scrollTo: (o: { top: number }) => void
+  doLayout: () => void
+} | null>(null)
 const tableHeight = ref(400)
 let resizeStartH = 400
 
@@ -133,12 +138,42 @@ function jumpFromMenu(): void {
   session.selectCell(text, sheetName.value, `${letters[c] ?? ''}${r}`, r, c + 1, workbook.value?.fileName ?? '')
 }
 
+async function copyFromMenu(): Promise<void> {
+  const m = ctxMenu.value
+  if (!m) return
+  closeCtxMenu()
+  const text = cellText(m.row - 1, m.col - 1)
+  if (!text) {
+    ElMessage.warning('该单元格为空')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制单元格数值')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
+
 function onTableResizeStart(): void {
   resizeStartH = tableHeight.value
 }
 function onTableResize(deltaY: number): void {
   tableHeight.value = Math.max(120, resizeStartH + deltaY)
   nextTick(() => gridRef.value?.doLayout())
+}
+
+// —— 左键拖拽平移（Ctrl+左键保留原生文本选择） ——
+const { onMouseDown: startPan } = useDragPan(
+  () =>
+    gridRef.value?.$el.querySelector<HTMLElement>('.el-table__body-wrapper .el-scrollbar__wrap') ??
+    null
+)
+
+/** 仅表体触发平移：表头留给列宽拖拽等原生交互 */
+function onGridMouseDown(e: MouseEvent): void {
+  if (!(e.target as HTMLElement | null)?.closest('.el-table__body-wrapper')) return
+  startPan(e)
 }
 
 // 全局单击任意位置关闭右键菜单
@@ -216,7 +251,7 @@ watch(
       <el-select v-model="sheetName" size="small" class="sheet-select" placeholder="选择工作表">
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 由比对结果点击跳转对应单元格（1对1）；右键单元格查看口径</span>
+      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 由比对结果点击跳转对应单元格（1对1）；右键单元格查看口径/复制数值；左键拖拽平移</span>
     </div>
     <el-table
       v-if="sheetData"
@@ -227,6 +262,7 @@ watch(
       :height="tableHeight"
       :cell-class-name="cellClass"
       :span-method="spanMethod"
+      @mousedown="onGridMouseDown"
       @cell-contextmenu="onCellContextMenu"
     >
       <el-table-column
@@ -258,6 +294,7 @@ watch(
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
     >
       <div class="ctx-item" @click="jumpFromMenu">查看该单元格口径</div>
+      <div class="ctx-item" @click="copyFromMenu">复制单元格数值</div>
     </div>
   </div>
 </template>
@@ -290,6 +327,10 @@ watch(
 }
 .table-wrap {
   overflow: auto;
+}
+/* 左键拖拽平移：表体显示抓手光标 */
+.sheet-grid :deep(.el-table__body-wrapper .el-scrollbar__wrap) {
+  cursor: grab;
 }
 </style>
 
