@@ -216,7 +216,7 @@ watch(
       <el-select v-model="sheetName" size="small" class="sheet-select" placeholder="选择工作表">
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 明细点击跳转；右键单元格查看口径</span>
+      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 由比对结果点击跳转对应单元格（1对1）；右键单元格查看口径</span>
     </div>
     <el-table
       v-if="sheetData"
