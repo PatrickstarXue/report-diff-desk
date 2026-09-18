@@ -14,6 +14,9 @@ const scale = ref(1.4)
 const totalPages = ref(0)
 const currentPage = ref(0)
 const matchSummary = ref('')
+const matchCount = ref(0)
+/** 当前定位到第几个命中（0 基） */
+const matchIndex = ref(0)
 
 interface PageBox {
   pageIndex: number
@@ -25,6 +28,9 @@ interface PageBox {
 
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 let highlights: PageBox[] = []
+/** 命中框 DOM，键为 highlights 下标，用于切换「当前命中」高亮 */
+const hitEls = new Map<number, HTMLElement>()
+let textLayers: pdfjsLib.TextLayer[] = []
 let disposed = false
 let renderToken = 0
 
@@ -34,11 +40,15 @@ async function loadPdf(): Promise<void> {
   if (!container) return
   pdfDoc?.destroy().catch(() => {})
   pdfDoc = null
+  for (const tl of textLayers) tl.cancel()
+  textLayers = []
   container.innerHTML = ''
   highlights = []
   currentPage.value = 0
   totalPages.value = 0
   matchSummary.value = ''
+  matchCount.value = 0
+  matchIndex.value = 0
 
   if (!props.pdfBase64) return
   const bytes = Uint8Array.from(atob(props.pdfBase64), (c) => c.charCodeAt(0))
@@ -62,6 +72,10 @@ async function renderAllPages(): Promise<void> {
   const token = ++renderToken
   clearHighlights()
   highlights = []
+  // 缩放重绘时废弃旧的文本层（在飞渲染已无意义）
+  for (const tl of textLayers) tl.cancel()
+  textLayers = []
+  container.querySelectorAll('.pdf-text-layer').forEach((el) => el.remove())
 
   let wraps = Array.from(container.querySelectorAll<HTMLElement>('.pdf-page-wrap'))
   if (wraps.length !== pdfDoc.numPages) {
@@ -110,12 +124,33 @@ async function renderAllPages(): Promise<void> {
         return { str: it.str, x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
       })
     )
+
+    // 文本层：透明文字覆盖在 canvas 上，使内容可选中/复制
+    // （构造时 container 即 rootContainer → 定位用百分比，与缩放无关）
+    wrap.style.setProperty('--scale-factor', String(scale.value))
+    const layerDiv = document.createElement('div')
+    layerDiv.className = 'pdf-text-layer'
+    wrap.appendChild(layerDiv)
+    const textLayer = new pdfjsLib.TextLayer({
+      textContentSource: textContent,
+      container: layerDiv,
+      viewport
+    })
+    textLayers.push(textLayer)
+    try {
+      await textLayer.render()
+    } catch {
+      // 文本层渲染失败不影响 canvas 显示
+    }
   }
   await runSearch()
 }
 
 async function runSearch(): Promise<void> {
   clearHighlights()
+  highlights = []
+  matchCount.value = 0
+  matchIndex.value = 0
   if (!pdfDoc) return
   const kw = keyword.value.trim()
   if (!kw) {
@@ -135,16 +170,26 @@ async function runSearch(): Promise<void> {
     }
   })
   highlights = found
-  matchSummary.value = found.length ? `共 ${found.length} 处` : '未找到'
+  matchCount.value = found.length
+  matchSummary.value = found.length ? '' : '未找到'
   drawHighlights()
-  if (found.length > 0) jumpTo(found[0].pageIndex)
+  if (found.length > 0) jumpToMatch(0)
+}
+
+/** 按顺序切换命中项，越界时循环（delta 为 +1 / -1） */
+function goToMatch(delta: number): void {
+  const n = highlights.length
+  if (!n) return
+  matchIndex.value = (matchIndex.value + delta + n) % n
+  applyActiveHit()
+  jumpToMatch(matchIndex.value)
 }
 
 function drawHighlights(): void {
   const wraps = containerRef.value?.querySelectorAll<HTMLElement>('.pdf-page-wrap') ?? []
-  for (const [pi, box] of highlights.entries()) {
+  highlights.forEach((box, pi) => {
     const wrap = wraps[box.pageIndex]
-    if (!wrap) continue
+    if (!wrap) return
     const el = document.createElement('div')
     el.className = 'pdf-hit'
     el.style.left = `${box.x}px`
@@ -152,25 +197,34 @@ function drawHighlights(): void {
     el.style.width = `${box.w}px`
     el.style.height = `${box.h}px`
     wrap.appendChild(el)
-    if (pi === 0) el.classList.add('pdf-hit--first')
-  }
+    hitEls.set(pi, el)
+  })
+  applyActiveHit()
+}
+
+function applyActiveHit(): void {
+  hitEls.forEach((el, pi) => el.classList.toggle('pdf-hit--current', pi === matchIndex.value))
 }
 
 function clearHighlights(): void {
   containerRef.value?.querySelectorAll('.pdf-hit').forEach((el) => el.remove())
+  hitEls.clear()
 }
 
-function jumpTo(pageIndex: number): void {
+/** 滚动到第 index 个命中项（定位到该命中所在位置，而非页首） */
+function jumpToMatch(index: number): void {
   const container = containerRef.value
-  if (!container) return
-  const wraps = container.querySelectorAll<HTMLElement>('.pdf-page-wrap')
-  const wrap = wraps[pageIndex]
-  if (wrap) {
-    const top =
-      wrap.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
-    container.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' })
-    currentPage.value = pageIndex + 1
-  }
+  const box = highlights[index]
+  if (!container || !box) return
+  const wrap = container.querySelectorAll<HTMLElement>('.pdf-page-wrap')[box.pageIndex]
+  if (!wrap) return
+  const wrapTop =
+    wrap.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+  container.scrollTo({
+    top: Math.max(0, wrapTop + box.y - container.clientHeight / 3),
+    behavior: 'smooth'
+  })
+  currentPage.value = box.pageIndex + 1
 }
 
 function onScroll(): void {
@@ -216,6 +270,11 @@ onUnmounted(() => {
     <div class="pdf-toolbar">
       <el-input v-model="keyword" size="small" class="pdf-search" placeholder="搜索关键字" clearable />
       <span class="pdf-meta">{{ matchSummary }}</span>
+      <el-button-group size="small">
+        <el-button :disabled="!matchCount" @click="goToMatch(-1)">上一个</el-button>
+        <el-button :disabled="!matchCount" @click="goToMatch(1)">下一个</el-button>
+      </el-button-group>
+      <span v-if="matchCount" class="pdf-meta">第 {{ matchIndex + 1 }} / {{ matchCount }} 处</span>
       <span class="pdf-meta">第 {{ currentPage }} / {{ totalPages }} 页</span>
       <el-button-group size="small">
         <el-button :disabled="scale <= 0.6" @click="changeScale(-0.2)">-</el-button>
@@ -266,13 +325,32 @@ onUnmounted(() => {
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
+/* 文本层：透明文字覆盖在 canvas 上，使 PDF 内容可选中/复制。
+   这些节点由 renderAllPages 命令式创建，不带 scoped 属性，样式必须放全局块 */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-size-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+}
+.pdf-text-layer span,
+.pdf-text-layer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
 .pdf-hit {
   position: absolute;
   background: rgba(255, 235, 59, 0.55);
   pointer-events: none;
-  z-index: 2;
+  z-index: 1;
 }
-.pdf-hit--first {
+.pdf-hit--current {
   background: rgba(255, 152, 0, 0.6);
 }
 </style>
