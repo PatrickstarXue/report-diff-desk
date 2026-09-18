@@ -4,7 +4,15 @@ import * as pdfjsLib from 'pdfjs-dist'
 // @ts-ignore vite worker import
 import PdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker'
 
-pdfjsLib.GlobalWorkerOptions.workerPort = new PdfjsWorker()
+/**
+ * 每次加载都新建 worker port，不可跨文档共享：
+ * pdf.js 的 PDFDocumentLoadingTask.destroy() 会连带 `terminate()` 掉
+ * GlobalWorkerOptions.workerPort 指向的 worker。共享一个模块级 port 时，
+ * 第一份文档 destroy 会杀死线程，第二份 getDocument() 永久挂起（无报错、不显示）。
+ */
+function newWorkerPort(): Worker {
+  return new PdfjsWorker()
+}
 
 const props = defineProps<{ pdfBase64: string | null | undefined }>()
 
@@ -51,6 +59,7 @@ async function loadPdf(): Promise<void> {
   matchIndex.value = 0
 
   if (!props.pdfBase64) return
+  pdfjsLib.GlobalWorkerOptions.workerPort = newWorkerPort()
   const bytes = Uint8Array.from(atob(props.pdfBase64), (c) => c.charCodeAt(0))
   const doc = await pdfjsLib.getDocument({ data: bytes }).promise
   if (disposed) {
