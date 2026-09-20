@@ -244,7 +244,7 @@ export interface TemplatePairResult {
   onlyInLeft: TemplateOnlyEntry[]
   onlyInRight: TemplateOnlyEntry[]
   totalCompared: number
-  /** 已套用的人工规则条数 */
+  /** 已套用的人工配对行对数（同一对行被多条规则指到只计一次） */
   manualPairs: number
 }
 

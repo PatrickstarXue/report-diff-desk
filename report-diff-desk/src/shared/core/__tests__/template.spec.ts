@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { checkTemplates, pairTemplateWorkbooks, parseTemplateSheet, tableNoOf, templateKeyOf } from '../template'
 import { toNumeric } from '../numeric'
-import type { AlignConfig, MergedRange, SheetData, TemplateSheet, WorkbookData } from '@shared/types'
+import type {
+  AlignConfig,
+  AlignPairRule,
+  MergedRange,
+  SheetData,
+  TemplateSheet,
+  WorkbookData
+} from '@shared/types'
 
 describe('templateKeyOf', () => {
   it('取 zip 条目名最后一段并去扩展名', () => {
@@ -323,25 +330,79 @@ describe('checkTemplates', () => {
     expect(res.totalCompared).toBe(0)
   })
 
-  it('人工配对覆盖自动结果并标 manual', () => {
-    // 左侧 R31 的「单位存款」路径配不上 NR31 的「一、活期/单位存款」
-    const l = tsheet('R31', [[5, 3, '单位存款', '发生额', 1.1]])
-    const r = tsheet('NR31', [[5, 3, '一、活期/单位存款', '发生额', 1]])
+  it('人工配对是行级的：只配一列，整行按列路径重新对齐', () => {
+    // 左侧 R31 的「单位存款」路径配不上 NR31 的「一、活期/单位存款」，两侧列路径相同
+    const l = tsheet('R31', [
+      [5, 3, '单位存款', 'D', 1.1],
+      [5, 4, '单位存款', 'E', 2.1],
+      [5, 5, '单位存款', 'F', 2]
+    ])
+    const r = tsheet('NR31', [
+      [5, 3, '一、活期/单位存款', 'D', 1],
+      [5, 4, '一、活期/单位存款', 'E', 2],
+      [5, 5, '一、活期/单位存款', 'F', 2]
+    ])
+    const auto = check(l, r)
+    expect(auto.diffs).toHaveLength(0)
+    expect(auto.onlyInLeft).toHaveLength(3)
+
+    // 只配 D 列一格，整行归位：D、E 各出一条差异，F 两侧相等不出条目
     const cfg: AlignConfig = {
       version: 1,
       templates: {},
       pairs: [{ left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 }]
     }
-    const auto = check(l, r)
-    expect(auto.diffs).toHaveLength(0)
-    expect(auto.onlyInLeft).toHaveLength(1)
-
     const res = check(l, r, 0.0001, cfg)
-    expect(res.diffs).toHaveLength(1)
-    expect(res.diffs[0].manual).toBe(true)
-    expect(res.diffs[0].kind).toBe('diff')
     expect(res.onlyInLeft).toHaveLength(0)
+    expect(res.onlyInRight).toHaveLength(0)
+    expect(res.diffs.map((d) => d.colPath)).toEqual(['D', 'E'])
+    expect(res.diffs.every((d) => d.manual)).toBe(true)
     expect(res.manualPairs).toBe(1)
+  })
+
+  it('行级配对：多条规则指同一对行只比对一次', () => {
+    const l = tsheet('R31', [
+      [5, 3, '单位存款', 'D', 1.1],
+      [5, 4, '单位存款', 'E', 2.1]
+    ])
+    const r = tsheet('NR31', [
+      [5, 3, '一、活期/单位存款', 'D', 1],
+      [5, 4, '一、活期/单位存款', 'E', 2]
+    ])
+    const pair = (fromCol: number, toCol: number): AlignPairRule => ({
+      left: 'R31',
+      right: 'NR31',
+      fromRow: 5,
+      fromCol,
+      toRow: 5,
+      toCol
+    })
+    const res = check(l, r, 0.0001, {
+      version: 1,
+      templates: {},
+      pairs: [pair(3, 3), pair(4, 4)]
+    })
+    expect(res.diffs.map((d) => d.colPath)).toEqual(['D', 'E']) // 不是 D、E、D、E
+    expect(res.manualPairs).toBe(1)
+  })
+
+  it('行级配对：列路径在一侧缺失的格仍记仅单侧存在', () => {
+    const l = tsheet('R31', [
+      [5, 3, '单位存款', 'D', 1.1],
+      [5, 4, '单位存款', '仅左侧有', 5]
+    ])
+    const r = tsheet('NR31', [
+      [5, 3, '一、活期/单位存款', 'D', 1],
+      [5, 5, '一、活期/单位存款', '仅右侧有', 6]
+    ])
+    const res = check(l, r, 0.0001, {
+      version: 1,
+      templates: {},
+      pairs: [{ left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 }]
+    })
+    expect(res.diffs.map((d) => d.colPath)).toEqual(['D'])
+    expect(res.onlyInLeft.map((e) => e.colPath)).toEqual(['仅左侧有'])
+    expect(res.onlyInRight.map((e) => e.colPath)).toEqual(['仅右侧有'])
   })
 
   it('忽略名单移除条目', () => {
