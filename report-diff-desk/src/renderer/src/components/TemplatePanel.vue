@@ -105,6 +105,21 @@ const unmatchedRightOptions = computed(() =>
   session.templateRight.filter((w) => (result.value?.unmatchedRight ?? []).includes(w.fileName))
 )
 
+/** 核对入口统一兜底：配置损坏时 loadAlignConfig 会抛错，不 catch 会让按钮看起来毫无反应 */
+async function runCheck(): Promise<void> {
+  try {
+    await session.runTemplateCheck()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    ElMessage.error(
+      // 仅配置读取/解析失败需要告诉用户如何恢复；其它核对错误（未选报表等）原样提示
+      msg.includes('人工规则配置')
+        ? `${msg}；可删除 userData/template-align.json 后重试`
+        : msg
+    )
+  }
+}
+
 async function addManualPair(): Promise<void> {
   if (!manualLeftId.value || !manualRightId.value) return
   session.manualTablePairs = [
@@ -113,7 +128,7 @@ async function addManualPair(): Promise<void> {
   ]
   manualLeftId.value = ''
   manualRightId.value = ''
-  await session.runTemplateCheck()
+  await runCheck()
 }
 
 // —— 选文件 ——
@@ -339,7 +354,7 @@ async function finishRange(row: number, col: number): Promise<void> {
         type="primary"
         :loading="session.loading"
         :disabled="!session.templateLeft.length || !session.templateRight.length"
-        @click="session.runTemplateCheck()"
+        @click="runCheck"
       >
         开始核对
       </el-button>
