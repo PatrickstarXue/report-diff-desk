@@ -1,5 +1,14 @@
 import { defineStore } from 'pinia'
-import type { BatchCompareResult, DocContent, FilePairResult, WorkbookData } from '@shared/types'
+import type {
+  AlignConfig,
+  BatchCompareResult,
+  DocContent,
+  FilePairResult,
+  TemplateCheckResult,
+  TemplatePairResult,
+  TemplateTablePair,
+  WorkbookData
+} from '@shared/types'
 import { buildIndex, type MappingIndex } from '@shared/core/mapping'
 
 interface SessionState {
@@ -27,6 +36,23 @@ interface SessionState {
   selectedDocCell: { sheet: string; row: number; col: number; value: string } | null
   /** 右侧标签页：result | grid | mapping | doc */
   uiTab: string
+  /** 表样核对：左侧（R 系列）与右侧（NR 系列）报表 */
+  templateLeft: WorkbookData[]
+  templateRight: WorkbookData[]
+  templateLeftPath: string
+  templateRightPath: string
+  templateResult: TemplateCheckResult | null
+  /** 表样核对的相对差阈值（小数，0.0001 = 0.01%） */
+  templateThreshold: number
+  /** 当前查看的表对索引 */
+  templatePairIndex: number
+  /** 网格当前显示哪一侧 */
+  templateSide: 'left' | 'right'
+  /** 差异列表点击 → 网格跳转目标 */
+  templateFocus: { row: number; col: number } | null
+  /** 人工指定的表对（表号冲突时用），仅本次生效 */
+  manualTablePairs: TemplateTablePair[]
+  alignConfig: AlignConfig | null
 }
 
 export const useSessionStore = defineStore('session', {
@@ -46,14 +72,48 @@ export const useSessionStore = defineStore('session', {
     activeDocIndex: 0,
     activeDocSheet: '',
     selectedDocCell: null,
-    uiTab: 'grid'
+    uiTab: 'grid',
+    templateLeft: [],
+    templateRight: [],
+    templateLeftPath: '',
+    templateRightPath: '',
+    templateResult: null,
+    templateThreshold: 0.0001,
+    templatePairIndex: 0,
+    templateSide: 'left',
+    templateFocus: null,
+    manualTablePairs: [],
+    alignConfig: null
   }),
 
   getters: {
     activePair: (s): FilePairResult | null => s.compareResult?.pairs[s.activePairIndex] ?? null,
     /** 顺序配对：pair 索引即两侧工作簿数组索引 */
     activeBase: (s): WorkbookData | null => s.baseWorkbooks[s.activePairIndex] ?? null,
-    activeCurr: (s): WorkbookData | null => s.currWorkbooks[s.activePairIndex] ?? null
+    activeCurr: (s): WorkbookData | null => s.currWorkbooks[s.activePairIndex] ?? null,
+    /** 当前表对；无结果时为 null */
+    activeTemplatePair: (s): TemplatePairResult | null =>
+      s.templateResult?.pairs[s.templatePairIndex] ?? null,
+    /** 当前表对中、当前侧对应的工作簿（按表样解析结果里的 workbookId 精确匹配） */
+    activeTemplateWorkbook: (s): WorkbookData | null => {
+      const p = s.templateResult?.pairs[s.templatePairIndex]
+      const ts = s.templateSide === 'left' ? p?.left : p?.right
+      if (!ts) return null
+      const list = s.templateSide === 'left' ? s.templateLeft : s.templateRight
+      return list.find((w) => w.id === ts.workbookId) ?? null
+    },
+    /** 当前表对中，落在当前侧的差异格集合（"row,col"，0 起始） */
+    templateHitSet: (s): Set<string> => {
+      const p = s.templateResult?.pairs[s.templatePairIndex]
+      const set = new Set<string>()
+      if (!p) return set
+      for (const d of p.diffs) {
+        set.add(
+          s.templateSide === 'left' ? `${d.leftRow},${d.leftCol}` : `${d.rightRow},${d.rightCol}`
+        )
+      }
+      return set
+    }
   },
 
   actions: {
@@ -205,6 +265,61 @@ export const useSessionStore = defineStore('session', {
     /** 离开网格时清除聚焦格标记 */
     clearGridFocus(): void {
       this.gridFocus = null
+    },
+
+    /** 加载表样核对某一侧的 zip */
+    async loadTemplateSide(side: 'left' | 'right', path: string): Promise<void> {
+      this.loading = true
+      try {
+        const res = await window.api.loadReport(path)
+        if (res.error) throw new Error(res.error)
+        if (res.workbooks.length === 0) throw new Error('文件中没有可解析的 Excel')
+        if (side === 'left') {
+          this.templateLeft = res.workbooks
+          this.templateLeftPath = path
+        } else {
+          this.templateRight = res.workbooks
+          this.templateRightPath = path
+        }
+        this.templateResult = null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async runTemplateCheck(): Promise<void> {
+      if (!this.templateLeft.length || !this.templateRight.length) return
+      this.loading = true
+      try {
+        this.templateResult = await window.api.checkTemplate({
+          leftIds: this.templateLeft.map((w) => w.id),
+          rightIds: this.templateRight.map((w) => w.id),
+          manualPairs: this.manualTablePairs,
+          threshold: this.templateThreshold
+        })
+        this.templatePairIndex = 0
+        this.templateFocus = null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async reloadAlignConfig(): Promise<void> {
+      this.alignConfig = await window.api.getAlignConfig()
+    },
+
+    /** 写入人工规则并重新核对 */
+    async saveAlignConfig(cfg: AlignConfig): Promise<void> {
+      await window.api.setAlignConfig(cfg)
+      this.alignConfig = cfg
+      await this.runTemplateCheck()
+    },
+
+    /** 差异列表行点击 → 切到对应侧并跳转 */
+    focusTemplateCell(pairIndex: number, side: 'left' | 'right', row: number, col: number): void {
+      this.templatePairIndex = pairIndex
+      this.templateSide = side
+      this.templateFocus = { row, col }
     }
   }
 })
