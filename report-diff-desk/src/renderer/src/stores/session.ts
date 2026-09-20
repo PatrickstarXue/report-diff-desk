@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import type {
   AlignConfig,
   BatchCompareResult,
+  CellRange,
   DocContent,
   FilePairResult,
   TemplateCheckResult,
@@ -10,6 +11,7 @@ import type {
   WorkbookData
 } from '@shared/types'
 import { buildIndex, type MappingIndex } from '@shared/core/mapping'
+import { templateKeyOf } from '@shared/core/template'
 
 interface SessionState {
   baseWorkbooks: WorkbookData[]
@@ -53,6 +55,8 @@ interface SessionState {
   /** 人工指定的表对（表号冲突时用），仅本次生效 */
   manualTablePairs: TemplateTablePair[]
   alignConfig: AlignConfig | null
+  /** 最近一次表样范围保存失败（已回滚）时的解析错误原文 */
+  templateRangeError: string
 }
 
 export const useSessionStore = defineStore('session', {
@@ -83,7 +87,8 @@ export const useSessionStore = defineStore('session', {
     templateSide: 'left',
     templateFocus: null,
     manualTablePairs: [],
-    alignConfig: null
+    alignConfig: null,
+    templateRangeError: ''
   }),
 
   getters: {
@@ -287,7 +292,12 @@ export const useSessionStore = defineStore('session', {
       }
     },
 
-    async runTemplateCheck(): Promise<void> {
+    /**
+     * 重新核对。
+     * @param opts.keepPairIndex 保留当前表对索引（保存规则触发时用）；否则回到第 1 对。
+     *   保留时若表对数量变化，索引被夹回合法范围（0 个表对时为 0）。
+     */
+    async runTemplateCheck(opts: { keepPairIndex?: boolean } = {}): Promise<void> {
       if (!this.templateLeft.length || !this.templateRight.length) return
       this.loading = true
       try {
@@ -299,7 +309,8 @@ export const useSessionStore = defineStore('session', {
         }
         // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
         this.templateResult = await window.api.checkTemplate(JSON.parse(JSON.stringify(req)))
-        this.templatePairIndex = 0
+        const last = Math.max(0, (this.templateResult?.pairs.length ?? 0) - 1)
+        this.templatePairIndex = opts.keepPairIndex ? Math.min(this.templatePairIndex, last) : 0
         this.templateFocus = null
       } finally {
         this.loading = false
@@ -311,13 +322,56 @@ export const useSessionStore = defineStore('session', {
       this.alignConfig = await window.api.getAlignConfig()
     },
 
-    /** 写入人工规则并重新核对 */
+    /** 写入人工规则并重新核对（保留当前表对，避免保存后跳回第 1 对） */
     async saveAlignConfig(cfg: AlignConfig): Promise<void> {
       // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
       const plain: AlignConfig = JSON.parse(JSON.stringify(cfg))
       await window.api.setAlignConfig(plain)
       this.alignConfig = plain
-      await this.runTemplateCheck()
+      await this.runTemplateCheck({ keepPairIndex: true })
+    },
+
+    /** 当前侧解析错误：候选范围写盘后，按表样键在核对结果中找该侧并取 error */
+    _templateSideError(key: string): string {
+      const p = this.templateResult?.pairs.find((x) =>
+        this.templateSide === 'left' ? x.left?.key === key : x.right?.key === key
+      )
+      if (!p) return `核对结果中未找到表样 ${key} 所属的表对`
+      return (this.templateSide === 'left' ? p.left?.error : p.right?.error) ?? ''
+    },
+
+    /**
+     * 人工指定表头区。写盘并重新核对后，若该侧解析失败则回滚到改动前的范围。
+     * 改动前若不存在该表样条目，回滚 = 删除条目（回到「项 目」锚点自动识别）。
+     * @returns true 已接受；false 已回滚（失败原因见 templateRangeError）
+     */
+    async setTemplateHeaderRange(headerRange: CellRange): Promise<boolean> {
+      const base = this.alignConfig
+      if (!base) throw new Error('人工规则配置未就绪')
+      const key = templateKeyOf(this.activeTemplateWorkbook?.fileName ?? '')
+      if (!key) throw new Error('未找到当前侧的报表文件')
+      const prevTemplates = { ...base.templates }
+      const prevRange = base.templates[key]?.headerRange
+      const basePairs = base.pairs
+
+      await this.saveAlignConfig({
+        version: 1,
+        templates: { ...prevTemplates, [key]: { headerRange } },
+        pairs: basePairs
+      })
+
+      const error = this._templateSideError(key)
+      if (!error) {
+        this.templateRangeError = ''
+        return true
+      }
+
+      const templates = { ...prevTemplates }
+      if (prevRange) templates[key] = { headerRange: prevRange }
+      else delete templates[key]
+      await this.saveAlignConfig({ version: 1, templates, pairs: basePairs })
+      this.templateRangeError = error
+      return false
     },
 
     /** 差异列表行点击 → 切到对应侧并跳转 */

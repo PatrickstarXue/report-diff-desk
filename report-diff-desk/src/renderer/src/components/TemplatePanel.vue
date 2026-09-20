@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AlignPairRule, CellRange, TemplateDiff } from '@shared/types'
+import type { AlignPairRule, TemplateDiff } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
+import { colLetters } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import TemplateGrid from './TemplateGrid.vue'
 
 const session = useSessionStore()
+
+/** 0 起始坐标 → 1 起始 Excel 坐标（如 row 3 / col 0 → A4），用于点选回显 */
+function a1(row: number, col: number): string {
+  return `${colLetters(col + 1)[col]}${row + 1}`
+}
 
 /** 阈值输入用百分数（0.01 = 0.01%），与现有环比比对一致 */
 const thresholdPct = ref(0.01)
@@ -88,9 +94,18 @@ const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.e
 const pickHint = computed(() => {
   if (pickSource.value) return '配对模式：请点击目标单元格'
   if (rangeArmed.value) {
-    return rangeStart.value ? '表样范围：请点击右下角单元格' : '表样范围：请点击左上角单元格'
+    if (!rangeStart.value) return '表头区：请点击左上角单元格（写有「项 目」的那一格）'
+    const start = a1(rangeStart.value.row, rangeStart.value.col)
+    return `表头区左上角已选 ${start}，请点击右下角单元格（最后一个列标题所在格）`
   }
   return ''
+})
+
+/** 该表对一格都没能自动配对（行标签路径两侧对不上），需要人工配对 */
+const noAutoPairHint = computed(() => {
+  const p = pair.value
+  if (!p) return false
+  return p.totalCompared === 0 && (p.onlyInLeft.length > 0 || p.onlyInRight.length > 0)
 })
 
 // —— 未配对的表：手动指定表对 ——
@@ -177,23 +192,21 @@ function onSideChange(v: string | number | boolean | undefined): void {
 // —— 人工规则读写 ——
 
 /** 合并写入：同表样对、同源格的旧规则被替换，其余规则原样保留；写盘失败提示并返回 false */
-async function saveRules(
-  newRules: AlignPairRule[],
-  headerKey?: string,
-  headerRange?: CellRange
-): Promise<boolean> {
+async function saveRules(newRules: AlignPairRule[]): Promise<boolean> {
   // 未就绪（读取失败）时以空基准合并会整体覆盖盘上旧规则，直接拒绝写入
   const base = session.alignConfig
   if (!base) {
     ElMessage.error('配置未就绪，已放弃保存以避免覆盖已有规则')
     return false
   }
-  const templates =
-    headerKey && headerRange ? { ...base.templates, [headerKey]: { headerRange } } : base.templates
   const keys = new Set(newRules.map((r) => `${r.left}|${r.right}|${r.fromRow}|${r.fromCol}`))
   const kept = base.pairs.filter((p) => !keys.has(`${p.left}|${p.right}|${p.fromRow}|${p.fromCol}`))
   try {
-    await session.saveAlignConfig({ version: 1, templates, pairs: [...kept, ...newRules] })
+    await session.saveAlignConfig({
+      version: 1,
+      templates: base.templates,
+      pairs: [...kept, ...newRules]
+    })
     return true
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
@@ -232,7 +245,7 @@ async function clearTableRules(): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-      `清除 ${keyL.value} ↔ ${keyR.value} 的全部人工配对与忽略规则？`,
+      `清除 ${keyL.value} ↔ ${keyR.value} 的人工配对、忽略规则，以及两侧（${keyL.value} / ${keyR.value}）的表头区指定？清除后表头区恢复「项 目」锚点自动识别。`,
       '确认',
       { type: 'warning' }
     )
@@ -240,9 +253,13 @@ async function clearTableRules(): Promise<void> {
     return
   }
   try {
+    // 两侧表样范围一并清除：回到锚点自动识别
+    const templates = { ...base.templates }
+    delete templates[keyL.value]
+    delete templates[keyR.value]
     await session.saveAlignConfig({
       version: 1,
-      templates: base.templates,
+      templates,
       pairs: base.pairs.filter((p) => !(p.left === keyL.value && p.right === keyR.value))
     })
     ElMessage.success('已清除')
@@ -264,7 +281,10 @@ function startRangePick(): void {
   pickSource.value = null
   rangeStart.value = null
   rangeArmed.value = true
-  ElMessage.info(`请点击 ${templateKeyOf(session.activeTemplateWorkbook?.fileName ?? '')} 表样区域的左上角单元格`)
+  const key = templateKeyOf(session.activeTemplateWorkbook?.fileName ?? '')
+  ElMessage.info(
+    `手动指定 ${key} 的表头区（不是整张表，也不是数据区）：请点击左上角单元格，即写有「项 目」的那一格`
+  )
 }
 
 async function onCellClick(row: number, col: number): Promise<void> {
@@ -311,7 +331,7 @@ async function finishRange(row: number, col: number): Promise<void> {
   if (!rangeStart.value) {
     // 第一次点击：记左上角，继续等右下角
     rangeStart.value = { row, col }
-    ElMessage.info('已选左上角，请点击右下角单元格')
+    ElMessage.info(`左上角已选 ${a1(row, col)}，请点击表头区右下角（最后一个列标题所在格）`)
     return
   }
   const start = rangeStart.value
@@ -319,13 +339,24 @@ async function finishRange(row: number, col: number): Promise<void> {
   rangeArmed.value = false
   const key = templateKeyOf(session.activeTemplateWorkbook?.fileName ?? '')
   if (!key) return
-  const ok = await saveRules([], key, {
-    r1: Math.min(start.row, row),
-    c1: Math.min(start.col, col),
-    r2: Math.max(start.row, row),
-    c2: Math.max(start.col, col)
-  })
-  if (ok) ElMessage.success(`已保存 ${key} 的表样范围`)
+  try {
+    // 保存与校验都在 store 里：坏范围会把该侧弄成「表头区未识别到数据列」，由 store 自动回滚
+    const ok = await session.setTemplateHeaderRange({
+      r1: Math.min(start.row, row),
+      c1: Math.min(start.col, col),
+      r2: Math.max(start.row, row),
+      c2: Math.max(start.col, col)
+    })
+    if (ok) {
+      ElMessage.success(`已保存 ${key} 的表头区（${a1(Math.min(start.row, row), Math.min(start.col, col))} → ${a1(Math.max(start.row, row), Math.max(start.col, col))}）`)
+    } else {
+      ElMessage.error(
+        `该范围导致 ${key} 解析失败（${session.templateRangeError}），已回滚到原范围`
+      )
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
 }
 </script>
 
@@ -374,8 +405,8 @@ async function finishRange(row: number, col: number): Promise<void> {
         <el-radio-button value="left">左侧</el-radio-button>
         <el-radio-button value="right">右侧</el-radio-button>
       </el-radio-group>
-      <el-button size="small" plain @click="startRangePick">手动指定表样范围</el-button>
-      <el-button size="small" plain @click="clearTableRules">清除本表对人工规则</el-button>
+      <el-button size="small" plain @click="startRangePick">手动指定表头区</el-button>
+      <el-button size="small" plain @click="clearTableRules">清除本表对规则</el-button>
       <span v-if="pair?.manualPairs" class="hint">已应用 {{ pair.manualPairs }} 条人工配对</span>
       <span v-if="pickHint" class="pick-hint">{{ pickHint }}</span>
       <span v-if="pairError" class="err-hint">{{ pairError }}</span>
@@ -394,6 +425,20 @@ async function finishRange(row: number, col: number): Promise<void> {
         指定为表对
       </el-button>
     </div>
+
+    <el-alert
+      v-if="noAutoPairHint"
+      type="warning"
+      show-icon
+      :closable="false"
+      title="本表对没有任何单元格自动配对成功"
+    >
+      <template #default>
+        两侧的「行标签路径」对不上（通常是某几行缺少父级标签），无法逐格比对。
+        请在下方网格中右键<strong>左侧</strong>要配对的行上任意一格 →「指定配对…」，
+        再在<strong>右侧</strong>点击对应行的任意一格；配对按<strong>行</strong>生效，配一次即可覆盖该行所有列。
+      </template>
+    </el-alert>
 
     <el-table
       v-if="result"
