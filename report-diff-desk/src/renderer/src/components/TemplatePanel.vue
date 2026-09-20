@@ -11,8 +11,8 @@ const session = useSessionStore()
 /** 阈值输入用百分数（0.01 = 0.01%），与现有环比比对一致 */
 const thresholdPct = ref(0.01)
 
-/** 配对模式：已点选的源格（null = 非配对模式） */
-const pickSource = ref<{ row: number; col: number } | null>(null)
+/** 配对模式：已点选的源格及其所在侧（null = 非配对模式） */
+const pickSource = ref<{ row: number; col: number; side: 'left' | 'right' } | null>(null)
 /** 表样范围模式：已武装，等待点选 */
 const rangeArmed = ref(false)
 /** 表样范围模式：已点选的左上角 */
@@ -221,7 +221,7 @@ async function clearTableRules(): Promise<void> {
 function onPickPair(row: number, col: number): void {
   rangeArmed.value = false
   rangeStart.value = null
-  pickSource.value = { row, col }
+  pickSource.value = { row, col, side: session.templateSide }
   ElMessage.info('请切换到另一侧，点击要配对的目标单元格')
 }
 
@@ -244,9 +244,14 @@ async function finishPair(row: number, col: number): Promise<void> {
   const src = pickSource.value
   pickSource.value = null
   if (!src) return
-  // 规则恒以左侧坐标为 from：源格在右侧时把方向翻过来
+  // 目标格必须在对侧：同侧点击不写规则，退出配对模式
+  if (session.templateSide === src.side) {
+    ElMessage.warning('请切换到另一侧，点击要配对的目标单元格')
+    return
+  }
+  // 规则恒为 {left: R 系列键, right: NR 系列键}，from 指左侧格、to 指右侧格
   const rule: AlignPairRule =
-    session.templateSide === 'left'
+    src.side === 'left'
       ? {
           left: keyL.value,
           right: keyR.value,
@@ -256,8 +261,8 @@ async function finishPair(row: number, col: number): Promise<void> {
           toCol: col
         }
       : {
-          left: keyR.value,
-          right: keyL.value,
+          left: keyL.value,
+          right: keyR.value,
           fromRow: row,
           fromCol: col,
           toRow: src.row,
