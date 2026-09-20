@@ -3,7 +3,13 @@ import { readFile, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { IPC } from '@shared/ipc'
 import { matchWorkbookPairs } from '@shared/core/pairing'
+import {
+  checkTemplates,
+  pairTemplateWorkbooks,
+  parseWorkbook
+} from '@shared/core/template'
 import type {
+  AlignConfig,
   BatchCompareResult,
   CompareRequest,
   DocContent,
@@ -15,8 +21,12 @@ import type {
   OpenFileRequest,
   OpenFileResult,
   RecentEntry,
-  SheetData
+  SheetData,
+  TemplateCheckRequest,
+  TemplateCheckResult,
+  WorkbookData
 } from '@shared/types'
+import { loadAlignConfig, saveAlignConfig } from './align'
 import { loadDocFile, loadReportFile } from './file/loader'
 import { parseExcel } from './file/excel'
 import { buildExcelZipBuffer } from './export/excel'
@@ -206,4 +216,53 @@ export function registerIpc(): void {
       // 写失败静默降级，不影响主流程
     }
   })
+
+  ipcMain.handle(
+    IPC.templateCheck,
+    async (_e, req: TemplateCheckRequest): Promise<TemplateCheckResult> => {
+      if (!Array.isArray(req?.leftIds) || !Array.isArray(req?.rightIds)) {
+        throw new Error('无效的核对请求')
+      }
+      const left = req.leftIds.map((id) => getWorkbook(id))
+      const right = req.rightIds.map((id) => getWorkbook(id))
+      if (left.some((w) => !w) || right.some((w) => !w)) {
+        throw new Error('部分工作簿不存在或已被释放')
+      }
+      if (left.length === 0 || right.length === 0) throw new Error('请先选择两套报表')
+
+      const cfg = await loadAlignConfig()
+      const threshold = typeof req.threshold === 'number' ? req.threshold : 0.0001
+      const pairing = pairTemplateWorkbooks(
+        left as WorkbookData[],
+        right as WorkbookData[],
+        req.manualPairs ?? []
+      )
+      const pairs = pairing.pairs.map((p) =>
+        checkTemplates(parseWorkbook(p.left, cfg), parseWorkbook(p.right, cfg), {
+          threshold,
+          config: cfg
+        })
+      )
+      pairs.sort((a, b) => (a.tableNo ?? '').localeCompare(b.tableNo ?? '', undefined, { numeric: true }))
+
+      return {
+        pairs,
+        unmatchedLeft: pairing.unmatchedLeft,
+        unmatchedRight: pairing.unmatchedRight,
+        threshold,
+        totalDiffs: pairs.reduce((s, p) => s + p.diffs.length, 0),
+        generatedAt: new Date().toISOString()
+      }
+    }
+  )
+
+  ipcMain.handle(IPC.templateAlignGet, (): Promise<AlignConfig> => loadAlignConfig())
+
+  ipcMain.handle(
+    IPC.templateAlignSet,
+    async (_e, req: { cfg: AlignConfig }): Promise<void> => {
+      if (!req?.cfg || typeof req.cfg !== 'object') throw new Error('无效的人工规则配置')
+      await saveAlignConfig(req.cfg)
+    }
+  )
 }

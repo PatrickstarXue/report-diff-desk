@@ -11,5 +11,8 @@ export const IPC = {
   exportRun: 'export:run',
   recentGet: 'recent:get',
   recentSet: 'recent:set',
+  templateCheck: 'template:check',
+  templateAlignGet: 'template:align:get',
+  templateAlignSet: 'template:align:set',
   appVersion: 'app:version'
 } as const

@@ -2,10 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { Api } from '@shared/api'
 import type {
+  AlignConfig,
   CompareRequest,
   ExportRequest,
   OpenFileRequest,
-  RecentEntry
+  RecentEntry,
+  TemplateCheckRequest
 } from '@shared/types'
 
 // 逐 channel 包装 invoke，不向 renderer 暴露 ipcRenderer 本体
@@ -22,6 +24,9 @@ const api: Api = {
   export: (req: ExportRequest) => ipcRenderer.invoke(IPC.exportRun, req),
   getRecent: () => ipcRenderer.invoke(IPC.recentGet),
   setRecent: (items: RecentEntry[]) => ipcRenderer.invoke(IPC.recentSet, { items }),
+  checkTemplate: (req: TemplateCheckRequest) => ipcRenderer.invoke(IPC.templateCheck, req),
+  getAlignConfig: () => ipcRenderer.invoke(IPC.templateAlignGet),
+  setAlignConfig: (cfg: AlignConfig) => ipcRenderer.invoke(IPC.templateAlignSet, { cfg }),
   getVersion: () => ipcRenderer.invoke(IPC.appVersion)
 }
 

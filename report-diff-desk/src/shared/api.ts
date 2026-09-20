@@ -1,4 +1,5 @@
 import type {
+  AlignConfig,
   BatchCompareResult,
   CompareRequest,
   DocContent,
@@ -9,7 +10,9 @@ import type {
   OpenFileRequest,
   OpenFileResult,
   RecentEntry,
-  SheetData
+  SheetData,
+  TemplateCheckRequest,
+  TemplateCheckResult
 } from './types'
 
 /** preload 暴露给 renderer 的 window.api 契约。修改时 preload/index.ts 必须同步实现。 */
@@ -26,6 +29,11 @@ export interface Api {
   export(req: ExportRequest): Promise<ExportResult>
   getRecent(): Promise<RecentEntry[]>
   setRecent(items: RecentEntry[]): Promise<void>
+  /** 表样核对：按表号配对两套报表并逐表比对 */
+  checkTemplate(req: TemplateCheckRequest): Promise<TemplateCheckResult>
+  /** 读取人工配对/表样范围配置 */
+  getAlignConfig(): Promise<AlignConfig>
+  setAlignConfig(cfg: AlignConfig): Promise<void>
   /** 应用版本号（Electron app.getVersion） */
   getVersion(): Promise<string>
 }
