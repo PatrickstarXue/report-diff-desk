@@ -304,6 +304,7 @@ export const useSessionStore = defineStore('session', {
       }
     },
 
+    /** 读取人工规则；失败时如实抛出（alignConfig 保持 null），由调用方提示用户，避免空基准覆盖盘上规则 */
     async reloadAlignConfig(): Promise<void> {
       this.alignConfig = await window.api.getAlignConfig()
     },

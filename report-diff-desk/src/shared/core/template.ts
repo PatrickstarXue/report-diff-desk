@@ -348,13 +348,13 @@ function applyRules(res: TemplatePairResult, cfg: AlignConfig | undefined, thres
   const rules = cfg.pairs.filter((p) => p.left === left.key && p.right === right.key)
   if (rules.length === 0) return
 
+  // 忽略规则先只收集，等行对重比跑完再统一过滤：重比会按列路径把整行重新 collect 回来，
+  // 若在此之前过滤，被忽略的格会被重比重新加回（规格 3.3：先配对、后忽略）。
+  const ignoredAt: [number, number][] = []
   const rowPairs: [number, number][] = []
   for (const rule of rules) {
     if (rule.ignored) {
-      res.diffs = res.diffs.filter((d) => !atLeft(d, rule.fromRow, rule.fromCol))
-      res.onlyInLeft = res.onlyInLeft.filter(
-        (e) => !(e.row === rule.fromRow && e.col === rule.fromCol)
-      )
+      ignoredAt.push([rule.fromRow, rule.fromCol])
       continue
     }
     if (rule.toRow === undefined || rule.toCol === undefined) continue
@@ -363,31 +363,40 @@ function applyRules(res: TemplatePairResult, cfg: AlignConfig | undefined, thres
       rowPairs.push([rule.fromRow, rule.toRow])
     }
   }
-  if (rowPairs.length === 0) return
 
-  const leftRows = new Set(rowPairs.map(([lr]) => lr))
-  const rightRows = new Set(rowPairs.map(([, rr]) => rr))
-  res.diffs = res.diffs.filter((d) => !leftRows.has(d.leftRow) && !rightRows.has(d.rightRow))
-  res.onlyInLeft = res.onlyInLeft.filter((e) => !leftRows.has(e.row))
-  res.onlyInRight = res.onlyInRight.filter((e) => !rightRows.has(e.row))
+  if (rowPairs.length > 0) {
+    const leftRows = new Set(rowPairs.map(([lr]) => lr))
+    const rightRows = new Set(rowPairs.map(([, rr]) => rr))
+    res.diffs = res.diffs.filter((d) => !leftRows.has(d.leftRow) && !rightRows.has(d.rightRow))
+    res.onlyInLeft = res.onlyInLeft.filter((e) => !leftRows.has(e.row))
+    res.onlyInRight = res.onlyInRight.filter((e) => !rightRows.has(e.row))
 
-  for (const [lr, rr] of rowPairs) {
-    res.manualPairs++ // 计数的是行对（用户实际做的配对次数），不是配成的格数
-    const byCol = new Map<string, TemplateCellRef>()
-    for (const c of right.cells) if (c.row === rr) byCol.set(c.colPath, c)
-    for (const l of left.cells) {
-      if (l.row !== lr) continue
-      const r = byCol.get(l.colPath)
-      if (!r) {
-        res.onlyInLeft.push(toOnly('left', l)) // 该列路径右侧没有，仍是仅单侧存在
-        continue
+    for (const [lr, rr] of rowPairs) {
+      res.manualPairs++ // 计数的是行对（用户实际做的配对次数），不是配成的格数
+      const byCol = new Map<string, TemplateCellRef>()
+      for (const c of right.cells) if (c.row === rr) byCol.set(c.colPath, c)
+      for (const l of left.cells) {
+        if (l.row !== lr) continue
+        const r = byCol.get(l.colPath)
+        if (!r) {
+          res.onlyInLeft.push(toOnly('left', l)) // 该列路径右侧没有，仍是仅单侧存在
+          continue
+        }
+        byCol.delete(l.colPath)
+        const before = res.diffs.length
+        collect(res.diffs, l, r, threshold)
+        if (res.diffs.length > before) res.diffs[res.diffs.length - 1].manual = true
       }
-      byCol.delete(l.colPath)
-      const before = res.diffs.length
-      collect(res.diffs, l, r, threshold)
-      if (res.diffs.length > before) res.diffs[res.diffs.length - 1].manual = true
+      for (const r of byCol.values()) res.onlyInRight.push(toOnly('right', r))
     }
-    for (const r of byCol.values()) res.onlyInRight.push(toOnly('right', r))
+  }
+
+  // 忽略恒以左侧坐标为键：重比后该左格只可能落在 diffs（命中右侧同列路径）或
+  // onlyInLeft（右侧无同列路径），不会变成 onlyInRight（其条目前提正是该左格不存在，
+  // 且携带的是右侧坐标），故 onlyInRight 不过滤。
+  for (const [r, c] of ignoredAt) {
+    res.diffs = res.diffs.filter((d) => !atLeft(d, r, c))
+    res.onlyInLeft = res.onlyInLeft.filter((e) => !(e.row === r && e.col === c))
   }
 }
 

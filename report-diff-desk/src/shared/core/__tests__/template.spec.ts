@@ -418,6 +418,29 @@ describe('checkTemplates', () => {
     expect(res.onlyInLeft).toHaveLength(0)
   })
 
+  it('同一行既有行对配对又有忽略规则：忽略在行对重比之后应用', () => {
+    const l = tsheet('R31', [
+      [5, 3, '单位存款', 'D', 1.1],
+      [5, 4, '单位存款', 'E', 2.1]
+    ])
+    const r = tsheet('NR31', [
+      [5, 3, '一、活期/单位存款', 'D', 1],
+      [5, 4, '一、活期/单位存款', 'E', 2]
+    ])
+    const cfg: AlignConfig = {
+      version: 1,
+      templates: {},
+      pairs: [
+        { left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 },
+        { left: 'R31', right: 'NR31', fromRow: 5, fromCol: 4, ignored: true }
+      ]
+    }
+    const res = check(l, r, 0.0001, cfg)
+    // E 列被忽略，不在 diffs；D 列仍按行对重比命中
+    expect(res.diffs.map((d) => d.colPath)).toEqual(['D'])
+    expect(res.manualPairs).toBe(1)
+  })
+
   it('表样键不匹配时人工规则不套用', () => {
     const l = tsheet('R31', [[5, 3, '单位存款', '发生额', 1.1]])
     const r = tsheet('NR31', [[5, 3, '一、活期/单位存款', '发生额', 1]])

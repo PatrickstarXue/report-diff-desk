@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AlignConfig, AlignPairRule, CellRange, TemplateDiff } from '@shared/types'
+import type { AlignPairRule, CellRange, TemplateDiff } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
 import { useSessionStore } from '../stores/session'
 import TemplateGrid from './TemplateGrid.vue'
@@ -18,7 +18,11 @@ const rangeArmed = ref(false)
 /** 表样范围模式：已点选的左上角 */
 const rangeStart = ref<{ row: number; col: number } | null>(null)
 
-onMounted(() => void session.reloadAlignConfig())
+onMounted(() => {
+  session.reloadAlignConfig().catch(() => {
+    ElMessage.error('人工规则配置读取失败，本次会话请勿保存规则以免覆盖')
+  })
+})
 
 watch(thresholdPct, (v) => {
   session.templateThreshold = Math.max(0, v) / 100
@@ -140,12 +144,19 @@ function onDiffCurrentChange(row: { diff: TemplateDiff; pairIndex: number } | nu
 function onPairIndexChange(v: number): void {
   session.templatePairIndex = v
   session.templateFocus = null
+  // 点选态不带表对身份：新表对同坐标恰好有格时会写出一条错误规则，必须清空
+  pickSource.value = null
+  rangeStart.value = null
+  rangeArmed.value = false
 }
 
 function onSideChange(v: string | number | boolean | undefined): void {
   if (v !== 'left' && v !== 'right') return
   session.templateSide = v
   session.templateFocus = null
+  pickSource.value = null
+  rangeStart.value = null
+  rangeArmed.value = false
 }
 
 // —— 人工规则读写 ——
@@ -156,7 +167,12 @@ async function saveRules(
   headerKey?: string,
   headerRange?: CellRange
 ): Promise<boolean> {
-  const base: AlignConfig = session.alignConfig ?? { version: 1, templates: {}, pairs: [] }
+  // 未就绪（读取失败）时以空基准合并会整体覆盖盘上旧规则，直接拒绝写入
+  const base = session.alignConfig
+  if (!base) {
+    ElMessage.error('配置未就绪，已放弃保存以避免覆盖已有规则')
+    return false
+  }
   const templates =
     headerKey && headerRange ? { ...base.templates, [headerKey]: { headerRange } } : base.templates
   const keys = new Set(newRules.map((r) => `${r.left}|${r.right}|${r.fromRow}|${r.fromCol}`))
@@ -194,7 +210,11 @@ async function ignoreAt(row: number, col: number): Promise<void> {
 }
 
 async function clearTableRules(): Promise<void> {
-  const base: AlignConfig = session.alignConfig ?? { version: 1, templates: {}, pairs: [] }
+  const base = session.alignConfig
+  if (!base) {
+    ElMessage.error('配置未就绪，已放弃清除以避免覆盖已有规则')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `清除 ${keyL.value} ↔ ${keyR.value} 的全部人工配对与忽略规则？`,
