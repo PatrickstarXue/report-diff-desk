@@ -33,6 +33,7 @@ export interface Api {
   checkTemplate(req: TemplateCheckRequest): Promise<TemplateCheckResult>
   /** 读取人工配对/表样范围配置 */
   getAlignConfig(): Promise<AlignConfig>
+  /** 保存人工规则：写盘失败会 reject，调用方必须 catch 并向用户提示 */
   setAlignConfig(cfg: AlignConfig): Promise<void>
   /** 应用版本号（Electron app.getVersion） */
   getVersion(): Promise<string>
