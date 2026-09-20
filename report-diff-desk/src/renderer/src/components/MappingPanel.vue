@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { GridCell } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
+import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import { useDragPan } from '../utils/dragPan'
 import ResizeBar from './ResizeBar.vue'
@@ -70,39 +71,8 @@ const spans = computed(() => {
   return s ? buildMergeSpans(s.merges, s.rowCount, s.colCount) : null
 })
 
-/** el-table 列序号 → 数据列索引（第 0 列是行号列） */
-function dataCol(columnIndex: number): number {
-  return columnIndex - 1
-}
-
-function spanMethod({
-  rowIndex,
-  columnIndex
-}: {
-  rowIndex: number
-  columnIndex: number
-}): [number, number] {
-  const c = dataCol(columnIndex)
-  if (c < 0) return [1, 1]
-  const s = spans.value?.[rowIndex]?.[c]
-  if (!s) return [1, 1]
-  return [s.rowspan, s.colspan]
-}
-
-function colLetters(colCount: number): string[] {
-  const out: string[] = []
-  for (let c = 1; c <= colCount; c++) {
-    let n = c
-    let letters = ''
-    while (n > 0) {
-      const rem = (n - 1) % 26
-      letters = String.fromCharCode(65 + rem) + letters
-      n = Math.floor((n - 1) / 26)
-    }
-    out.push(letters)
-  }
-  return out
-}
+/** el-table span-method：主格展开，被覆盖格隐藏；行号列不参与合并 */
+const spanMethod = makeSpanMethod(() => spans.value)
 
 function cellText(cell: GridCell | null): string {
   if (!cell || cell.v === null) return ''
