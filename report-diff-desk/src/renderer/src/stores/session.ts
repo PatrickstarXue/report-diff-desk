@@ -291,12 +291,14 @@ export const useSessionStore = defineStore('session', {
       if (!this.templateLeft.length || !this.templateRight.length) return
       this.loading = true
       try {
-        this.templateResult = await window.api.checkTemplate({
+        const req = {
           leftIds: this.templateLeft.map((w) => w.id),
           rightIds: this.templateRight.map((w) => w.id),
           manualPairs: this.manualTablePairs,
           threshold: this.templateThreshold
-        })
+        }
+        // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
+        this.templateResult = await window.api.checkTemplate(JSON.parse(JSON.stringify(req)))
         this.templatePairIndex = 0
         this.templateFocus = null
       } finally {
@@ -311,8 +313,10 @@ export const useSessionStore = defineStore('session', {
 
     /** 写入人工规则并重新核对 */
     async saveAlignConfig(cfg: AlignConfig): Promise<void> {
-      await window.api.setAlignConfig(cfg)
-      this.alignConfig = cfg
+      // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
+      const plain: AlignConfig = JSON.parse(JSON.stringify(cfg))
+      await window.api.setAlignConfig(plain)
+      this.alignConfig = plain
       await this.runTemplateCheck()
     },
 
