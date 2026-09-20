@@ -159,3 +159,131 @@ export interface ExportResult {
   canceled: boolean
   path?: string
 }
+
+// —— 表样核对 ——
+
+/** 单元格矩形范围（0 起始，含端点） */
+export interface CellRange {
+  r1: number
+  c1: number
+  r2: number
+  c2: number
+}
+
+/** 表样中的一个「数据格」及其行/列标签路径 */
+export interface TemplateCellRef {
+  /** 0 起始行号 */
+  row: number
+  /** 0 起始列号 */
+  col: number
+  rowPath: string
+  colPath: string
+  text: string
+  num: number | null
+}
+
+/** 一张表解析后的表样视图 */
+export interface TemplateSheet {
+  /** 表样键：文件名去扩展名，如 "R06" */
+  key: string
+  /** 表号：文件名中「字母+数字」的数字部分去前导零，如 "6"；提不出为 null */
+  tableNo: string | null
+  fileName: string
+  workbookId: string
+  sheetName: string
+  headerRange: CellRange
+  /** 标签列最大列号 */
+  labelEnd: number
+  dataStartRow: number
+  dataStartCol: number
+  /** 仅含「有值行」的全部数据格 */
+  cells: TemplateCellRef[]
+  /** 表头范围来自人工指定而非锚点推断 */
+  manualHeader: boolean
+  error?: string
+}
+
+export type TemplateDiffKind = 'diff' | 'left-only-value' | 'right-only-value'
+
+export interface TemplateDiff {
+  rowPath: string
+  colPath: string
+  leftRow: number
+  leftCol: number
+  rightRow: number
+  rightCol: number
+  leftText: string
+  rightText: string
+  leftNum: number | null
+  rightNum: number | null
+  /** |左-右| / max(|左|,|右|)；单侧有值时为 null */
+  relDiff: number | null
+  kind: TemplateDiffKind
+  /** 该条目由人工配对产生 */
+  manual?: boolean
+}
+
+/** 只在单侧存在的项（整行或整列在另一侧没有） */
+export interface TemplateOnlyEntry {
+  side: 'left' | 'right'
+  rowPath: string
+  colPath: string
+  row: number
+  col: number
+  text: string
+}
+
+export interface TemplatePairResult {
+  tableNo: string | null
+  pairLabel: string
+  leftFile: string
+  rightFile: string
+  left: TemplateSheet | null
+  right: TemplateSheet | null
+  diffs: TemplateDiff[]
+  onlyInLeft: TemplateOnlyEntry[]
+  onlyInRight: TemplateOnlyEntry[]
+  totalCompared: number
+  /** 已套用的人工规则条数 */
+  manualPairs: number
+}
+
+export interface TemplateCheckResult {
+  pairs: TemplatePairResult[]
+  unmatchedLeft: string[]
+  unmatchedRight: string[]
+  threshold: number
+  totalDiffs: number
+  generatedAt: string
+}
+
+/** 人工配对 / 忽略规则（坐标 0 起始，from* 指左侧、to* 指右侧） */
+export interface AlignPairRule {
+  left: string
+  right: string
+  fromRow: number
+  fromCol: number
+  toRow?: number
+  toCol?: number
+  ignored?: boolean
+}
+
+export interface AlignConfig {
+  version: 1
+  templates: Record<string, { headerRange?: CellRange }>
+  pairs: AlignPairRule[]
+}
+
+/** 手动指定的表对关系（表号提不出或冲突时用），仅本次生效 */
+export interface TemplateTablePair {
+  leftId: string
+  rightId: string
+}
+
+export interface TemplateCheckRequest {
+  leftIds: string[]
+  rightIds: string[]
+  /** 优先于按表号自动配对 */
+  manualPairs?: TemplateTablePair[]
+  threshold: number
+}
