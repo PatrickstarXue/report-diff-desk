@@ -1,4 +1,15 @@
-import type { AlignConfig, CellRange, SheetData, TemplateCellRef, TemplateSheet, WorkbookData } from '../types'
+import type {
+  AlignConfig,
+  CellRange,
+  SheetData,
+  TemplateCellRef,
+  TemplateDiff,
+  TemplateOnlyEntry,
+  TemplatePairResult,
+  TemplateSheet,
+  TemplateTablePair,
+  WorkbookData
+} from '../types'
 import { buildMergeSpans } from './merge'
 import { toNumeric } from './numeric'
 
@@ -200,4 +211,208 @@ export function parseWorkbook(wb: WorkbookData, cfg?: AlignConfig): TemplateShee
     )
   }
   return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id }, cfg)
+}
+
+/** 表对配对结果 */
+export interface TemplatePairing {
+  pairs: { left: WorkbookData; right: WorkbookData }[]
+  unmatchedLeft: string[]
+  unmatchedRight: string[]
+}
+
+/**
+ * 按表号自动配对；manualPairs 指定的表对优先并占用名额。
+ * 表号提不出或一侧出现多个同号候选时不自动配对，交给人工指定。
+ */
+export function pairTemplateWorkbooks(
+  left: WorkbookData[],
+  right: WorkbookData[],
+  manualPairs: TemplateTablePair[] = []
+): TemplatePairing {
+  const pairs: { left: WorkbookData; right: WorkbookData }[] = []
+  const usedL = new Set<string>()
+  const usedR = new Set<string>()
+
+  for (const mp of manualPairs) {
+    const l = left.find((w) => w.id === mp.leftId)
+    const r = right.find((w) => w.id === mp.rightId)
+    if (!l || !r || usedL.has(l.id) || usedR.has(r.id)) continue
+    pairs.push({ left: l, right: r })
+    usedL.add(l.id)
+    usedR.add(r.id)
+  }
+
+  const byNo = new Map<string, WorkbookData[]>()
+  for (const w of right) {
+    const no = tableNoOf(w.fileName)
+    if (!no) continue
+    const list = byNo.get(no)
+    if (list) list.push(w)
+    else byNo.set(no, [w])
+  }
+
+  for (const w of left) {
+    if (usedL.has(w.id)) continue
+    const no = tableNoOf(w.fileName)
+    if (!no) continue
+    const cands = byNo.get(no)
+    if (!cands || cands.length !== 1 || usedR.has(cands[0].id)) continue
+    pairs.push({ left: w, right: cands[0] })
+    usedL.add(w.id)
+    usedR.add(cands[0].id)
+  }
+
+  return {
+    pairs,
+    unmatchedLeft: left.filter((w) => !usedL.has(w.id)).map((w) => w.fileName),
+    unmatchedRight: right.filter((w) => !usedR.has(w.id)).map((w) => w.fileName)
+  }
+}
+
+export interface TemplateCheckOptions {
+  threshold: number
+  config?: AlignConfig
+}
+
+/** (行路径|列路径) → 单元格；同键重复时追加序号 #2、#3，避免静默错配 */
+function indexCells(cells: TemplateCellRef[]): Map<string, TemplateCellRef> {
+  const seen = new Map<string, number>()
+  const out = new Map<string, TemplateCellRef>()
+  for (const c of cells) {
+    const base = `${c.rowPath} ${c.colPath}`
+    const n = (seen.get(base) ?? 0) + 1
+    seen.set(base, n)
+    out.set(n === 1 ? base : `${base} #${n}`, c)
+  }
+  return out
+}
+
+function toOnly(side: 'left' | 'right', c: TemplateCellRef): TemplateOnlyEntry {
+  return { side, rowPath: c.rowPath, colPath: c.colPath, row: c.row, col: c.col, text: c.text }
+}
+
+/** 两侧同键单元格比值：命中阈值产出 diff，一侧为空产出单侧有值，其余跳过 */
+function collect(
+  out: TemplateDiff[],
+  l: TemplateCellRef,
+  r: TemplateCellRef,
+  threshold: number
+): void {
+  const a = l.num
+  const b = r.num
+  if (a === null && b === null) return
+  const common = {
+    rowPath: l.rowPath,
+    colPath: l.colPath,
+    leftRow: l.row,
+    leftCol: l.col,
+    rightRow: r.row,
+    rightCol: r.col,
+    leftText: l.text,
+    rightText: r.text,
+    leftNum: a,
+    rightNum: b
+  }
+  if (a === null || b === null) {
+    out.push({
+      ...common,
+      relDiff: null,
+      kind: a === null ? 'right-only-value' : 'left-only-value'
+    })
+    return
+  }
+  const denom = Math.max(Math.abs(a), Math.abs(b))
+  if (denom === 0) return // 双 0
+  const relDiff = Math.abs(a - b) / denom
+  if (relDiff > threshold) out.push({ ...common, relDiff, kind: 'diff' })
+}
+
+const atLeft = (d: TemplateDiff, r: number, c: number): boolean =>
+  d.leftRow === r && d.leftCol === c
+const atRight = (d: TemplateDiff, r: number, c: number): boolean =>
+  d.rightRow === r && d.rightCol === c
+
+/**
+ * 套用人工配对与忽略名单：先移除涉及这两个格子的自动结果，再按人工配对重新产出条目。
+ * 规则的表样键必须与当前表对一致，否则整条忽略（换了一套报表后旧规则自然失效，不误套）。
+ */
+function applyRules(res: TemplatePairResult, cfg: AlignConfig | undefined, threshold: number): void {
+  const left = res.left
+  const right = res.right
+  if (!cfg || !left || !right || left.error || right.error) return
+  const rules = cfg.pairs.filter((p) => p.left === left.key && p.right === right.key)
+  if (rules.length === 0) return
+
+  for (const rule of rules) {
+    res.diffs = res.diffs.filter((d) => !atLeft(d, rule.fromRow, rule.fromCol))
+    res.onlyInLeft = res.onlyInLeft.filter(
+      (e) => !(e.row === rule.fromRow && e.col === rule.fromCol)
+    )
+
+    if (rule.ignored) continue
+    if (rule.toRow === undefined || rule.toCol === undefined) continue
+
+    res.diffs = res.diffs.filter((d) => !atRight(d, rule.toRow as number, rule.toCol as number))
+    res.onlyInRight = res.onlyInRight.filter(
+      (e) => !(e.row === rule.toRow && e.col === rule.toCol)
+    )
+
+    const l = left.cells.find((c) => c.row === rule.fromRow && c.col === rule.fromCol)
+    const r = right.cells.find((c) => c.row === rule.toRow && c.col === rule.toCol)
+    if (!l || !r) continue
+    res.manualPairs++
+    const before = res.diffs.length
+    collect(res.diffs, l, r, threshold)
+    if (res.diffs.length > before) res.diffs[res.diffs.length - 1].manual = true
+  }
+}
+
+function sortResult(res: TemplatePairResult): void {
+  const byPath = (a: { rowPath: string; colPath: string }, b: { rowPath: string; colPath: string }): number =>
+    a.rowPath.localeCompare(b.rowPath, 'zh') || a.colPath.localeCompare(b.colPath, 'zh')
+  res.diffs.sort(byPath)
+  res.onlyInLeft.sort(byPath)
+  res.onlyInRight.sort(byPath)
+}
+
+/** 逐表配对并比对；左右任一解析失败时返回空结果（错误随 TemplateSheet.error 传出） */
+export function checkTemplates(
+  left: TemplateSheet,
+  right: TemplateSheet,
+  opts: TemplateCheckOptions
+): TemplatePairResult {
+  const res: TemplatePairResult = {
+    tableNo: left.tableNo ?? right.tableNo,
+    pairLabel: `${left.fileName} ↔ ${right.fileName}`,
+    leftFile: left.fileName,
+    rightFile: right.fileName,
+    left,
+    right,
+    diffs: [],
+    onlyInLeft: [],
+    onlyInRight: [],
+    totalCompared: 0,
+    manualPairs: 0
+  }
+  if (left.error || right.error) return res
+
+  const li = indexCells(left.cells)
+  const ri = indexCells(right.cells)
+
+  for (const [k, lc] of li) {
+    const rc = ri.get(k)
+    if (!rc) {
+      res.onlyInLeft.push(toOnly('left', lc))
+      continue
+    }
+    res.totalCompared++
+    collect(res.diffs, lc, rc, opts.threshold)
+  }
+  for (const [k, rc] of ri) {
+    if (!li.has(k)) res.onlyInRight.push(toOnly('right', rc))
+  }
+
+  applyRules(res, opts.config, opts.threshold)
+  sortResult(res)
+  return res
 }
