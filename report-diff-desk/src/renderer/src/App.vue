@@ -8,6 +8,7 @@ import SheetGrid from './components/SheetGrid.vue'
 import MappingPanel from './components/MappingPanel.vue'
 import DocViewer from './components/DocViewer.vue'
 import OverviewPanel from './components/OverviewPanel.vue'
+import TemplatePanel from './components/TemplatePanel.vue'
 
 const session = useSessionStore()
 const appVersion = ref('')
@@ -97,6 +98,9 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           </el-tab-pane>
           <el-tab-pane label="口径文档" name="doc">
             <DocViewer />
+          </el-tab-pane>
+          <el-tab-pane label="表样核对" name="template">
+            <TemplatePanel />
           </el-tab-pane>
         </el-tabs>
       </el-main>
