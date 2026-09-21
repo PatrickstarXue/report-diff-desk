@@ -40,13 +40,13 @@ interface SessionState {
   selectedDocCell: { sheet: string; row: number; col: number; value: string } | null
   /** 右侧标签页：result | grid | mapping | doc */
   uiTab: string
-  /** 表样核对：左侧（R 系列）与右侧（NR 系列）报表 */
+  /** 新旧表数据比对：左侧（R 系列）与右侧（NR 系列）报表 */
   templateLeft: WorkbookData[]
   templateRight: WorkbookData[]
   templateLeftPath: string
   templateRightPath: string
   templateResult: TemplateCheckResult | null
-  /** 表样核对的相对差阈值（小数，0.0001 = 0.01%） */
+  /** 新旧表数据比对的相对差阈值（小数，0.0001 = 0.01%） */
   templateThreshold: number
   /**
    * 锚点词列表（界面里是一排可删的标签）。
@@ -300,7 +300,7 @@ export const useSessionStore = defineStore('session', {
       this.gridFocus = null
     },
 
-    /** 加载表样核对某一侧的 zip */
+    /** 加载新旧表数据比对某一侧的 zip */
     async loadTemplateSide(side: 'left' | 'right', path: string): Promise<void> {
       this.loading = true
       try {

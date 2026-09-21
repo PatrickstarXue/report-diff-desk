@@ -29,7 +29,7 @@ export interface Api {
   export(req: ExportRequest): Promise<ExportResult>
   getRecent(): Promise<RecentEntry[]>
   setRecent(items: RecentEntry[]): Promise<void>
-  /** 表样核对：按表号配对两套报表并逐表比对 */
+  /** 新旧表数据比对：按表号配对两套报表并逐表比对 */
   checkTemplate(req: TemplateCheckRequest): Promise<TemplateCheckResult>
   /** 读取人工配对/表样范围配置 */
   getAlignConfig(): Promise<AlignConfig>

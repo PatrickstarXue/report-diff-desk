@@ -16,7 +16,7 @@ const thresholdPct = ref(0.01)
 /** 子标签页：比对结果 | 对比规则 */
 const subTab = ref('result')
 
-/** 差异列表默认展开；只想看下方网格高亮时收起它 */
+/** 差异列表默认展开；只想看下方网格标色时收起它 */
 const openPanels = ref<string[]>(['diffs'])
 
 onMounted(() => {

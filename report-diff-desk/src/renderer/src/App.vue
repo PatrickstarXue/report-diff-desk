@@ -54,7 +54,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           :disabled="!session.compareResult"
           @click="exportResult('excel')"
         >
-          导出网格高亮zip（Excel 原格式 + 紫色标记）
+          导出报表环比zip（Excel 原格式 + 紫色标记）
         </el-button>
         <el-button
           size="small"
@@ -63,7 +63,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           :disabled="!session.compareResult"
           @click="exportResult('html')"
         >
-          导出对比结果HTML
+          导出环比结果HTML
         </el-button>
       </div>
     </el-header>
@@ -79,10 +79,10 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
       </el-aside>
       <el-main class="app-main">
         <el-tabs v-model="session.uiTab" class="app-tabs">
-          <el-tab-pane label="网格高亮" name="grid">
+          <el-tab-pane label="报表环比" name="grid">
             <SheetGrid />
           </el-tab-pane>
-          <el-tab-pane label="比对结果" name="result">
+          <el-tab-pane label="环比结果概览" name="result">
             <template v-if="session.compareResult">
               <OverviewPanel
                 :compare-result="session.compareResult"
@@ -99,7 +99,7 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
           <el-tab-pane label="口径文档" name="doc">
             <DocViewer />
           </el-tab-pane>
-          <el-tab-pane label="表样核对" name="template">
+          <el-tab-pane label="新旧表数据比对" name="template">
             <TemplatePanel />
           </el-tab-pane>
         </el-tabs>

@@ -54,7 +54,7 @@ function revealSelectedCell(): void {
     ?.scrollIntoView({ block: 'center', inline: 'nearest' })
 }
 
-// 从网格高亮页跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
+// 从报表环比页跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
 watch(
   () => session.selectedDocCell,
   (sel) => {

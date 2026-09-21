@@ -26,7 +26,7 @@ const T = 0.0001
 const cellAt = (t: TemplateSheet, row: number, col: number) =>
   t.cells.find((c) => c.row === row && c.col === col)
 
-describe.skipIf(!hasSamples)('表样核对 · 真实样例端到端', () => {
+describe.skipIf(!hasSamples)('新旧表数据比对 · 真实样例端到端', () => {
   const left = FILES.filter((f) => f.startsWith('R')).map(load)
   const right = FILES.filter((f) => f.startsWith('NR')).map(load)
 
@@ -134,7 +134,7 @@ describe.skipIf(!hasSamples)('表样核对 · 真实样例端到端', () => {
   })
 })
 
-describe.skipIf(!hasSamples21)('表样核对 · 锚点落在最后一个标签列（R21/NR21）', () => {
+describe.skipIf(!hasSamples21)('新旧表数据比对 · 锚点落在最后一个标签列（R21/NR21）', () => {
   const load21 = (name: string): TemplateSheet =>
     parseWorkbook(parseExcel(readFileSync(resolve(DIR, name)), name, 'file'), ['机构类别'])
 
