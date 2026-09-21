@@ -1,202 +1,65 @@
 import { describe, it, expect } from 'vitest'
-import { checkTemplates, pairTemplateWorkbooks, parseTemplateSheet, tableNoOf, templateKeyOf } from '../template'
+import {
+  checkTemplates,
+  effectiveRule,
+  pairTemplateWorkbooks,
+  parseTemplateSheet,
+  parseWorkbook,
+  tableNoOf,
+  templateKeyOf
+} from '../template'
 import { toNumeric } from '../numeric'
 import type {
-  AlignConfig,
-  AlignPairRule,
   MergedRange,
+  RuleTablePair,
   SheetData,
   TemplateSheet,
   WorkbookData
 } from '@shared/types'
 
-describe('templateKeyOf', () => {
-  it('取 zip 条目名最后一段并去扩展名', () => {
-    expect(templateKeyOf('R06.xls')).toBe('R06')
-    expect(templateKeyOf('上期包.zip/R06.xlsx')).toBe('R06')
-    expect(templateKeyOf('zip/R06.xls')).toBe('R06')
-  })
+// ——— 造表工具 ———
 
-  it('大小写扩展名都能去', () => {
-    expect(templateKeyOf('NR31.XLS')).toBe('NR31')
-  })
-})
-
-describe('tableNoOf', () => {
-  it('整段匹配 字母+数字', () => {
-    expect(tableNoOf('R06.xls')).toBe('6')
-    expect(tableNoOf('NR06.xls')).toBe('6')
-    expect(tableNoOf('上期包.zip/NR31.xls')).toBe('31')
-  })
-
-  it('整段匹配失败时取名字开头的 字母+数字', () => {
-    expect(tableNoOf('R06-人民币贴现利率水平表.xls')).toBe('6')
-  })
-
-  it('纯数字或中文开头返回 null', () => {
-    expect(tableNoOf('06.xls')).toBeNull()
-    expect(tableNoOf('附件2：新口径19张NR表上报逻辑 V1.0.2.xls')).toBeNull()
-  })
-
-  it('去前导零', () => {
-    expect(tableNoOf('R006.xls')).toBe('6')
-  })
-})
-
-/** 造 SheetData：数字串转 number，其余转 string，'.' 与 '' 视为空 */
-function sheetOf(name: string, rows: string[][], merges?: MergedRange[]): SheetData {
-  const cells = rows.map((row) =>
-    row.map((v) => {
-      if (v === '' || v === '.') return null
-      return /^-?\d+(\.\d+)?$/.test(v) ? { v: Number(v) } : { v }
-    })
+/** 造 SheetData：cells 用 [row, col, value] 三元组描述，其余为空格 */
+function sheetOf(
+  rowCount: number,
+  colCount: number,
+  entries: [number, number, string | number | null][],
+  merges: MergedRange[] = []
+): SheetData {
+  const cells = Array.from({ length: rowCount }, () =>
+    Array.from({ length: colCount }, () => null as { v: string | number | null } | null)
   )
-  return {
-    name,
-    rowCount: rows.length,
-    colCount: Math.max(0, ...rows.map((r) => r.length)),
-    cells,
-    merges
-  }
+  for (const [r, c, v] of entries) cells[r][c] = { v }
+  return { name: 'S', rowCount, colCount, cells, merges }
 }
 
-const input = (sheet: SheetData, fileName = 'R06.xls') => ({
-  sheet,
-  fileName,
-  workbookId: 'wb1'
-})
-
-/**
- * 基准表样（0 起始）：
- *   r0  表名
- *   r1  [项  目][-][-][发生额][W]      ← 锚点在 A2，合并 A2:C3
- *   r2  [-][-][-][发生额][.]
- *   r3  [贴现][银承][3个月][1.5][2.5]  ← 合并 A4:A5、B4:B5
- *   r4  [-][-][6个月][1.6][2.6]
- */
-const baseSheet = (): SheetData =>
-  sheetOf(
-    'R06',
+/** 标准锚点表：锚点在第 3 行 A 列，表头区 A4:C5，数据从 D 列第 6 行起 */
+function anchoredSheet(
+  entries: [number, number, string | number | null][],
+  rowCount = 12
+): SheetData {
+  return sheetOf(
+    rowCount,
+    8,
     [
-      ['表名', '', '', '', ''],
-      ['项  目', '', '', '发生额', 'W'],
-      ['', '', '', '', ''],
-      ['贴现', '银承', '3个月', '1.5', '2.5'],
-      ['', '', '6个月', '1.6', '2.6']
+      [3, 0, '项    目'],
+      [3, 3, '发生额'],
+      [5, 0, '贴现'],
+      [5, 1, '银承'],
+      [5, 2, '3个月'],
+      ...entries
     ],
     [
-      { r1: 1, c1: 0, r2: 2, c2: 2 },
-      { r1: 3, c1: 0, r2: 4, c2: 0 },
-      { r1: 3, c1: 1, r2: 4, c2: 1 }
+      { r1: 3, c1: 0, r2: 4, c2: 2 },
+      { r1: 3, c1: 3, r2: 4, c2: 3 }
     ]
   )
+}
 
-describe('parseTemplateSheet', () => {
-  it('锚点合并范围决定表头行与标签列', () => {
-    const t = parseTemplateSheet(input(baseSheet()))
-    expect(t.error).toBeUndefined()
-    expect(t.headerRange).toEqual({ r1: 1, c1: 0, r2: 2, c2: 2 })
-    expect(t.labelEnd).toBe(2)
-    expect(t.dataStartRow).toBe(3)
-    expect(t.dataStartCol).toBe(3)
-    expect(t.manualHeader).toBe(false)
-  })
+const parse = (s: SheetData, fileName = 'R06.xls'): TemplateSheet =>
+  parseTemplateSheet({ sheet: s, fileName, workbookId: 'w1' })
 
-  it('行路径由标签列各段拼接，合并格向下填充', () => {
-    const t = parseTemplateSheet(input(baseSheet()))
-    expect(t.cells.map((c) => c.rowPath)).toContain('贴现/银承/3个月')
-    expect(t.cells.map((c) => c.rowPath)).toContain('贴现/银承/6个月')
-  })
-
-  it('列路径由表头行各段拼接，相邻重复段合并', () => {
-    const t = parseTemplateSheet(input(baseSheet()))
-    const paths = t.cells.map((c) => c.colPath)
-    expect(new Set(paths)).toEqual(new Set(['发生额', 'W']))
-  })
-
-  it('横跨两列合并的标签不重复拼接', () => {
-    // 「一、活期」合并 A2:B2，填充后 A、B 两列都是同一文本
-    const s = sheetOf(
-      'X',
-      [
-        ['项  目', '', 'V'],
-        ['一、活期', '', '1']
-      ],
-      [
-        { r1: 0, c1: 0, r2: 0, c2: 1 },
-        { r1: 1, c1: 0, r2: 1, c2: 1 }
-      ]
-    )
-    const t = parseTemplateSheet(input(s, 'R01.xls'))
-    expect(t.cells[0].rowPath).toBe('一、活期')
-  })
-
-  it('数据列全空的行不产出 cells（两侧都空即无差异）', () => {
-    const s = baseSheet()
-    s.cells.push([{ v: '合计' }, { v: '' }, { v: '' }, null, null])
-    s.rowCount = 6
-    const t = parseTemplateSheet(input(s))
-    expect(t.cells.some((c) => c.rowPath === '合计')).toBe(false)
-  })
-
-  it('横向合并跨过数据列的注释行被排除', () => {
-    // 注释行 A6:E6 合并：数据列区全是合并覆盖格，没有原始值
-    const s = baseSheet()
-    s.cells.push([{ v: '注：本表只统计境内业务数据。' }])
-    s.rowCount = 6
-    s.merges = [...(s.merges ?? []), { r1: 5, c1: 0, r2: 5, c2: 4 }]
-    const t = parseTemplateSheet(input(s))
-    expect(t.cells.some((c) => c.rowPath.startsWith('注：'))).toBe(false)
-  })
-
-  it('数据区合并覆盖格跳过，只取主格值', () => {
-    // D5:E5 合并（数据行 r3）：E 变成覆盖格，该行只剩主格 col 3
-    const s = baseSheet()
-    s.merges = [...(s.merges ?? []), { r1: 3, c1: 3, r2: 3, c2: 4 }]
-    const t = parseTemplateSheet(input(s))
-    const r3 = t.cells.filter((c) => c.row === 3)
-    expect(r3.map((c) => c.col)).toEqual([3])
-    expect(r3[0].num).toBe(1.5)
-    // 未合并的行不受影响，两列都在
-    expect(t.cells.filter((c) => c.row === 4).map((c) => c.col)).toEqual([3, 4])
-  })
-
-  it('找不到锚点时报错', () => {
-    const s = sheetOf('X', [['表名', '', ''], ['甲', '乙', '1']])
-    const t = parseTemplateSheet(input(s, 'R01.xls'))
-    expect(t.error).toBe('未找到「项 目」锚点，请手动指定表样范围')
-    expect(t.cells).toEqual([])
-  })
-
-  it('人工 headerRange 覆盖锚点推断并标记 manualHeader', () => {
-    const s = sheetOf('X', [['项  目', '', 'V'], ['甲', '乙', '1']])
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: { R01: { headerRange: { r1: 0, c1: 0, r2: 0, c2: 1 } } },
-      pairs: []
-    }
-    const t = parseTemplateSheet(input(s, 'R01.xls'), cfg)
-    expect(t.error).toBeUndefined()
-    expect(t.manualHeader).toBe(true)
-    expect(t.labelEnd).toBe(1)
-    expect(t.dataStartRow).toBe(1)
-    expect(t.dataStartCol).toBe(2)
-  })
-
-  it('表样键不匹配时人工范围不套用', () => {
-    const s = sheetOf('X', [['表名', '', ''], ['甲', '乙', '1']])
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: { R99: { headerRange: { r1: 0, c1: 0, r2: 0, c2: 1 } } },
-      pairs: []
-    }
-    expect(parseTemplateSheet(input(s, 'R01.xls'), cfg).error).toBe(
-      '未找到「项 目」锚点，请手动指定表样范围'
-    )
-  })
-})
-
-/** 直接造 TemplateSheet，跳过表格解析，专测配对与比对 */
+/** 直接造 TemplateSheet，跳过解析，专测配对与比对 */
 function tsheet(
   key: string,
   cells: [number, number, string, string, string | number | null][]
@@ -207,20 +70,16 @@ function tsheet(
     fileName: `${key}.xls`,
     workbookId: key,
     sheetName: key,
-    headerRange: { r1: 0, c1: 0, r2: 0, c2: 0 },
-    labelEnd: 0,
-    dataStartRow: 1,
-    dataStartCol: 1,
+    degraded: false,
     cells: cells.map(([row, col, rowPath, colPath, v]) => ({
       row,
       col,
       rowPath,
       colPath,
       text: v === null ? '' : String(v),
-      // 与 parseTemplateSheet 一致地走 toNumeric，字符串 '1,200' / '-200' 也能数值化
-      num: toNumeric(v === null ? null : { v })
-    })),
-    manualHeader: false
+      num: toNumeric(v === null ? null : { v }),
+      seed: `${rowPath}_${colPath}`
+    }))
   }
 }
 
@@ -228,237 +87,293 @@ const check = (
   l: TemplateSheet,
   r: TemplateSheet,
   threshold = 0.0001,
-  config?: AlignConfig
-): ReturnType<typeof checkTemplates> => checkTemplates(l, r, { threshold, config })
+  ruleTable?: RuleTablePair
+): ReturnType<typeof checkTemplates> => checkTemplates(l, r, { threshold, ruleTable })
+
+// ——— 表号与表样键 ———
+
+describe('templateKeyOf', () => {
+  it('取 zip 条目名最后一段并去扩展名', () => {
+    expect(templateKeyOf('R06.xls')).toBe('R06')
+    expect(templateKeyOf('上期包.zip/R06.xlsx')).toBe('R06')
+    expect(templateKeyOf('zip/R06.xls')).toBe('R06')
+  })
+
+  it('大小写扩展名都能去', () => {
+    expect(templateKeyOf('R06.XLS')).toBe('R06')
+    expect(templateKeyOf('R06.Xlsx')).toBe('R06')
+  })
+})
+
+describe('tableNoOf', () => {
+  it('整段匹配 字母+数字', () => {
+    expect(tableNoOf('R06.xls')).toBe('6')
+    expect(tableNoOf('NR31.xls')).toBe('31')
+  })
+
+  it('整段匹配失败时取名字开头的 字母+数字', () => {
+    expect(tableNoOf('R06-人民币贴现利率水平表.xls')).toBe('6')
+  })
+
+  it('纯数字或中文开头返回 null', () => {
+    expect(tableNoOf('附件2.xls')).toBeNull()
+    expect(tableNoOf('报表.xls')).toBeNull()
+  })
+
+  it('去前导零', () => {
+    expect(tableNoOf('R006.xls')).toBe('6')
+  })
+})
+
+// ——— 解析与种子 ———
+
+describe('parseTemplateSheet', () => {
+  it('锚点合并范围决定表头区，数据格带种子规则值', () => {
+    const t = parse(anchoredSheet([[5, 3, 1.1]]))
+    expect(t.error).toBeUndefined()
+    expect(t.degraded).toBe(false)
+    expect(t.cells).toHaveLength(1)
+    expect(t.cells[0].rowPath).toBe('贴现/银承/3个月')
+    expect(t.cells[0].colPath).toBe('发生额')
+    expect(t.cells[0].seed).toBe('贴现/银承/3个月_发生额')
+  })
+
+  it('行路径由标签列各段拼接，合并格向下填充', () => {
+    const s = anchoredSheet([
+      [5, 3, 1],
+      [6, 3, 2]
+    ])
+    // sheetOf 总会给 merges 一个数组，断言只为满足可选字段的类型
+    s.merges!.push(
+      { r1: 5, c1: 0, r2: 6, c2: 0 },
+      { r1: 5, c1: 1, r2: 6, c2: 1 },
+      { r1: 5, c1: 2, r2: 6, c2: 2 }
+    )
+    const t = parse(s)
+    expect(t.cells.map((c) => c.rowPath)).toEqual(['贴现/银承/3个月', '贴现/银承/3个月'])
+  })
+
+  it('找不到锚点时降级：行列标签退化为位置，锚点缺失不再报错', () => {
+    const t = parse(
+      sheetOf(3, 3, [
+        [0, 0, '随便'],
+        [1, 1, 5]
+      ])
+    )
+    expect(t.error).toBeUndefined()
+    expect(t.degraded).toBe(true)
+    expect(t.cells).toHaveLength(1)
+    expect(t.cells[0].rowPath).toBe('第2行')
+    expect(t.cells[0].colPath).toBe('B')
+    expect(t.cells[0].seed).toBe('第2行_B')
+  })
+
+  it('表头区找不到数据列时同样降级', () => {
+    // 锚点在 A4，但数据列范围内没有任何列标签
+    const s = sheetOf(8, 4, [[3, 0, '项    目'], [5, 2, 9]], [{ r1: 3, c1: 0, r2: 4, c2: 2 }])
+    const t = parse(s)
+    expect(t.error).toBeUndefined()
+    expect(t.degraded).toBe(true)
+    expect(t.cells).toHaveLength(1)
+    expect(t.cells[0].num).toBe(9)
+  })
+
+  it('数据列全空的行不产出 cells（两侧都空即无差异）', () => {
+    const t = parse(anchoredSheet([[5, 3, null]]))
+    expect(t.cells).toHaveLength(0)
+  })
+
+  it('数据区合并覆盖格跳过，只取主格值', () => {
+    const s = sheetOf(
+      8,
+      6,
+      [
+        [3, 0, '项    目'],
+        [3, 3, '发生额'],
+        [5, 0, '贴现'],
+        [5, 3, 7]
+      ],
+      [
+        { r1: 3, c1: 0, r2: 4, c2: 2 },
+        // 表头横跨两列 → 两列列路径都是「发生额」
+        { r1: 3, c1: 3, r2: 4, c2: 4 },
+        // 数据区合并覆盖 (5,4)，该格不得产出
+        { r1: 5, c1: 3, r2: 5, c2: 4 }
+      ]
+    )
+    const t = parse(s)
+    expect(t.cells.map((c) => c.col)).toEqual([3])
+    expect(t.cells[0].num).toBe(7)
+  })
+
+  it('工作簿中没有工作表时报错', () => {
+    const wb: WorkbookData = {
+      id: 'w1',
+      fileName: 'R06.xls',
+      source: 'file',
+      sheetNames: [],
+      sheets: {}
+    }
+    expect(parseWorkbook(wb).error).toBe('工作簿中没有工作表')
+  })
+})
+
+// ——— 规则值与生效值 ———
+
+describe('effectiveRule', () => {
+  const cell = tsheet('R06', [[5, 3, '甲', '乙', 1]]).cells[0]
+
+  it('规则表缺席时用种子', () => {
+    expect(effectiveRule(undefined, cell)).toBe('甲_乙')
+  })
+
+  it('规则表有该位置时以其为准', () => {
+    expect(effectiveRule({ '5,3': '自定义' }, cell)).toBe('自定义')
+  })
+
+  it('空串表示不比对，且不会被种子顶替', () => {
+    expect(effectiveRule({ '5,3': '' }, cell)).toBe('')
+  })
+
+  it('比较前 trim', () => {
+    expect(effectiveRule({ '5,3': '  甲_乙  ' }, cell)).toBe('甲_乙')
+  })
+})
+
+// ——— 等值配对与比对判据 ———
 
 describe('checkTemplates', () => {
-  it('跨行偏移的同行路径正确配对', () => {
-    const l = tsheet('R06', [[5, 3, '转贴现/买断/3个月', '发生额', 1.5]])
-    const r = tsheet('NR06', [[8, 3, '转贴现/买断/3个月', '发生额', 1.5]])
+  it('两侧规则值相同即配对（行坐标不同也能配上）', () => {
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 10]])
+    const r = tsheet('NR06', [[9, 3, '甲', '乙', 10]])
     const res = check(l, r)
     expect(res.totalCompared).toBe(1)
-    expect(res.diffs).toHaveLength(0) // 值相同，无差异
+    expect(res.diffs).toHaveLength(0)
+  })
+
+  it('规则值不同则不配对，各自进未配上清单', () => {
+    const l = tsheet('R31', [[5, 3, '单位存款', '乙', 1.1]])
+    const r = tsheet('NR31', [[5, 3, '一、活期/单位存款', '乙', 1]])
+    const res = check(l, r)
+    expect(res.totalCompared).toBe(0)
+    expect(res.onlyInLeft.map((e) => e.rule)).toEqual(['单位存款_乙'])
+    expect(res.onlyInRight.map((e) => e.rule)).toEqual(['一、活期/单位存款_乙'])
+  })
+
+  it('规则表把两侧规则值改成一致后即配对并比对', () => {
+    const l = tsheet('R31', [[5, 3, '单位存款', '乙', 1.1]])
+    const r = tsheet('NR31', [[5, 3, '一、活期/单位存款', '乙', 1]])
+    const ruleTable: RuleTablePair = {
+      left: { '5,3': '活期单位存款_乙' },
+      right: { '5,3': '活期单位存款_乙' }
+    }
+    const res = check(l, r, 0.0001, ruleTable)
+    expect(res.totalCompared).toBe(1)
+    expect(res.diffs).toHaveLength(1)
+    expect(res.diffs[0].rule).toBe('活期单位存款_乙')
+    expect(res.diffs[0].kind).toBe('diff')
+  })
+
+  it('清空一侧的规则值即把该格排除出比对；对侧同值格成为孤儿进未配上', () => {
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 1]])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', 2]])
+    const ruleTable: RuleTablePair = { left: { '5,3': '' }, right: {} }
+    const res = check(l, r, 0.0001, ruleTable)
+    expect(res.totalCompared).toBe(0)
+    expect(res.diffs).toHaveLength(0)
+    expect(res.onlyInLeft).toHaveLength(0)
+    // 清空只作用于该侧：对侧那个规则值没有对应，按规格进「未配上」清单
+    expect(res.onlyInRight.map((e) => e.rule)).toEqual(['甲_乙'])
+  })
+
+  it('两侧都清空则两侧都不出现（彻底忽略）', () => {
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 1]])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', 2]])
+    const ruleTable: RuleTablePair = { left: { '5,3': '' }, right: { '5,3': '' } }
+    const res = check(l, r, 0.0001, ruleTable)
+    expect(res.totalCompared).toBe(0)
+    expect(res.diffs).toHaveLength(0)
+    expect(res.onlyInLeft).toHaveLength(0)
+    expect(res.onlyInRight).toHaveLength(0)
+  })
+
+  it('规则值在一侧重复时该值整体不配对，且进 duplicateRules', () => {
+    const l = tsheet('R06', [
+      [5, 3, '甲', '乙', 1],
+      [6, 3, '甲', '乙', 2]
+    ])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', 1]])
+    const res = check(l, r)
+    expect(res.totalCompared).toBe(0)
+    expect(res.diffs).toHaveLength(0)
+    expect(res.duplicateRules).toEqual([{ side: 'left', rule: '甲_乙', count: 2 }])
     expect(res.onlyInLeft).toHaveLength(0)
     expect(res.onlyInRight).toHaveLength(0)
   })
 
   it('相对差超过阈值标记 diff', () => {
-    const l = tsheet('R06', [[5, 3, 'A', '发生额', 1.2]])
-    const r = tsheet('NR06', [[5, 3, 'A', '发生额', 1]])
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 1.2]])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', 1]])
     const res = check(l, r)
-    expect(res.diffs).toHaveLength(1)
     expect(res.diffs[0].kind).toBe('diff')
-    expect(res.diffs[0].relDiff).toBeCloseTo(0.2 / 1.2, 10)
+    expect(res.diffs[0].relDiff).toBeCloseTo(1 / 6, 10)
   })
 
   it('相对差恰好等于阈值不标记（严格大于）', () => {
-    // |2.0001-2| / 2.0001 = 0.0000499975...；阈值设为该值本身
-    const rd = Math.abs(2.0001 - 2) / 2.0001
-    const l = tsheet('R31', [[5, 12, 'A', '（75,+∞）', 2.0001]])
-    const r = tsheet('NR31', [[5, 12, 'A', '（75,+∞）', 2]])
-    expect(check(l, r, rd).diffs).toHaveLength(0)
-    expect(check(l, r, rd * 0.5).diffs).toHaveLength(1)
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 2]])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', 1]])
+    // |2-1| / max(2,1) = 0.5，阈值取同一个算式算出的值，规避浮点误差
+    const res = check(l, r, Math.abs(2 - 1) / Math.max(2, 1))
+    expect(res.diffs).toHaveLength(0)
   })
 
   it('双 0 跳过、两侧都无数值跳过', () => {
     const l = tsheet('R06', [
-      [5, 3, 'A', '发生额', 0],
-      [6, 3, 'B', '发生额', null]
+      [5, 3, '甲', '乙', 0],
+      [6, 3, '甲', '丙', null],
+      [7, 3, '甲', '丁', '文本']
     ])
     const r = tsheet('NR06', [
-      [5, 3, 'A', '发生额', 0],
-      [6, 3, 'B', '发生额', null]
+      [5, 3, '甲', '乙', 0],
+      [6, 3, '甲', '丙', null],
+      [7, 3, '甲', '丁', '文本']
     ])
     expect(check(l, r).diffs).toHaveLength(0)
   })
 
   it('一侧有值一侧为空记单侧有值', () => {
-    const l = tsheet('R06', [[5, 3, 'A', '发生额', 1.5]])
-    const r = tsheet('NR06', [[5, 3, 'A', '发生额', null]])
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 1]])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', null]])
     const res = check(l, r)
     expect(res.diffs).toHaveLength(1)
     expect(res.diffs[0].kind).toBe('left-only-value')
     expect(res.diffs[0].relDiff).toBeNull()
   })
 
-  it('只在单侧出现的行进 onlyIn，不进 diffs', () => {
-    const l = tsheet('R06', [
-      [5, 3, 'A', '发生额', 1],
-      [6, 3, '贴现/银承/合计', '发生额', 3.3]
-    ])
-    const r = tsheet('NR06', [[5, 3, 'A', '发生额', 1]])
+  it('负值与千分位文本贯通数值化', () => {
+    const l = tsheet('R06', [[5, 3, '甲', '乙', '-1,200']])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', -600]])
     const res = check(l, r)
-    expect(res.diffs).toHaveLength(0)
-    expect(res.onlyInLeft).toHaveLength(1)
-    expect(res.onlyInLeft[0].rowPath).toBe('贴现/银承/合计')
-  })
-
-  it('同表内配对键重复时按出现顺序分别配对，不静默错配', () => {
-    const l = tsheet('R06', [
-      [5, 3, 'A', '发生额', 1],
-      [9, 3, 'A', '发生额', 5]
-    ])
-    const r = tsheet('NR06', [
-      [5, 3, 'A', '发生额', 1.5],
-      [9, 3, 'A', '发生额', 5]
-    ])
-    const res = check(l, r)
-    expect(res.diffs).toHaveLength(1)
-    expect(res.diffs[0].leftRow).toBe(5)
-    expect(res.diffs[0].rightRow).toBe(5)
-  })
-
-  it('负值与千分位、百分号文本贯通数值化', () => {
-    const l = tsheet('R06', [
-      [5, 3, 'A', '发生额', -100],
-      [6, 3, 'B', '发生额', 1000]
-    ])
-    const r = tsheet('NR06', [
-      [5, 3, 'A', '发生额', '-200'],
-      [6, 3, 'B', '发生额', '1,200']
-    ])
-    const res = check(l, r)
-    expect(res.diffs).toHaveLength(2)
-    expect(res.diffs[0].kind).toBe('diff')
+    expect(res.diffs[0].leftNum).toBe(-1200)
+    expect(res.diffs[0].relDiff).toBeCloseTo(0.5, 10)
   })
 
   it('解析失败的表返回空结果', () => {
-    const l = tsheet('R06', [[5, 3, 'A', '发生额', 1]])
-    const bad: TemplateSheet = { ...tsheet('NR06', []), error: '未找到「项 目」锚点，请手动指定表样范围' }
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 1]])
+    const bad: TemplateSheet = { ...tsheet('NR06', []), error: '工作簿中没有工作表' }
     const res = check(l, bad)
     expect(res.diffs).toHaveLength(0)
     expect(res.totalCompared).toBe(0)
   })
-
-  it('人工配对是行级的：只配一列，整行按列路径重新对齐', () => {
-    // 左侧 R31 的「单位存款」路径配不上 NR31 的「一、活期/单位存款」，两侧列路径相同
-    const l = tsheet('R31', [
-      [5, 3, '单位存款', 'D', 1.1],
-      [5, 4, '单位存款', 'E', 2.1],
-      [5, 5, '单位存款', 'F', 2]
-    ])
-    const r = tsheet('NR31', [
-      [5, 3, '一、活期/单位存款', 'D', 1],
-      [5, 4, '一、活期/单位存款', 'E', 2],
-      [5, 5, '一、活期/单位存款', 'F', 2]
-    ])
-    const auto = check(l, r)
-    expect(auto.diffs).toHaveLength(0)
-    expect(auto.onlyInLeft).toHaveLength(3)
-
-    // 只配 D 列一格，整行归位：D、E 各出一条差异，F 两侧相等不出条目
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: {},
-      pairs: [{ left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 }]
-    }
-    const res = check(l, r, 0.0001, cfg)
-    expect(res.onlyInLeft).toHaveLength(0)
-    expect(res.onlyInRight).toHaveLength(0)
-    expect(res.diffs.map((d) => d.colPath)).toEqual(['D', 'E'])
-    expect(res.diffs.every((d) => d.manual)).toBe(true)
-    expect(res.manualPairs).toBe(1)
-  })
-
-  it('行级配对：多条规则指同一对行只比对一次', () => {
-    const l = tsheet('R31', [
-      [5, 3, '单位存款', 'D', 1.1],
-      [5, 4, '单位存款', 'E', 2.1]
-    ])
-    const r = tsheet('NR31', [
-      [5, 3, '一、活期/单位存款', 'D', 1],
-      [5, 4, '一、活期/单位存款', 'E', 2]
-    ])
-    const pair = (fromCol: number, toCol: number): AlignPairRule => ({
-      left: 'R31',
-      right: 'NR31',
-      fromRow: 5,
-      fromCol,
-      toRow: 5,
-      toCol
-    })
-    const res = check(l, r, 0.0001, {
-      version: 1,
-      templates: {},
-      pairs: [pair(3, 3), pair(4, 4)]
-    })
-    expect(res.diffs.map((d) => d.colPath)).toEqual(['D', 'E']) // 不是 D、E、D、E
-    expect(res.manualPairs).toBe(1)
-  })
-
-  it('行级配对：列路径在一侧缺失的格仍记仅单侧存在', () => {
-    const l = tsheet('R31', [
-      [5, 3, '单位存款', 'D', 1.1],
-      [5, 4, '单位存款', '仅左侧有', 5]
-    ])
-    const r = tsheet('NR31', [
-      [5, 3, '一、活期/单位存款', 'D', 1],
-      [5, 5, '一、活期/单位存款', '仅右侧有', 6]
-    ])
-    const res = check(l, r, 0.0001, {
-      version: 1,
-      templates: {},
-      pairs: [{ left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 }]
-    })
-    expect(res.diffs.map((d) => d.colPath)).toEqual(['D'])
-    expect(res.onlyInLeft.map((e) => e.colPath)).toEqual(['仅左侧有'])
-    expect(res.onlyInRight.map((e) => e.colPath)).toEqual(['仅右侧有'])
-  })
-
-  it('忽略名单移除条目', () => {
-    const l = tsheet('R31', [[5, 3, '单位存款', '发生额', 1.1]])
-    const r = tsheet('NR31', [[5, 3, '一、活期/单位存款', '发生额', 1]])
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: {},
-      pairs: [{ left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, ignored: true }]
-    }
-    const res = check(l, r, 0.0001, cfg)
-    expect(res.diffs).toHaveLength(0)
-    expect(res.onlyInLeft).toHaveLength(0)
-  })
-
-  it('同一行既有行对配对又有忽略规则：忽略在行对重比之后应用', () => {
-    const l = tsheet('R31', [
-      [5, 3, '单位存款', 'D', 1.1],
-      [5, 4, '单位存款', 'E', 2.1]
-    ])
-    const r = tsheet('NR31', [
-      [5, 3, '一、活期/单位存款', 'D', 1],
-      [5, 4, '一、活期/单位存款', 'E', 2]
-    ])
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: {},
-      pairs: [
-        { left: 'R31', right: 'NR31', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 },
-        { left: 'R31', right: 'NR31', fromRow: 5, fromCol: 4, ignored: true }
-      ]
-    }
-    const res = check(l, r, 0.0001, cfg)
-    // E 列被忽略，不在 diffs；D 列仍按行对重比命中
-    expect(res.diffs.map((d) => d.colPath)).toEqual(['D'])
-    expect(res.manualPairs).toBe(1)
-  })
-
-  it('表样键不匹配时人工规则不套用', () => {
-    const l = tsheet('R31', [[5, 3, '单位存款', '发生额', 1.1]])
-    const r = tsheet('NR31', [[5, 3, '一、活期/单位存款', '发生额', 1]])
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: {},
-      pairs: [{ left: 'R06', right: 'NR06', fromRow: 5, fromCol: 3, toRow: 5, toCol: 3 }]
-    }
-    expect(check(l, r, 0.0001, cfg).diffs).toHaveLength(0)
-    expect(check(l, r, 0.0001, cfg).onlyInLeft).toHaveLength(1)
-  })
 })
+
+// ——— 表对配对 ———
 
 describe('pairTemplateWorkbooks', () => {
   const wb = (fileName: string, id = fileName): WorkbookData => ({
     id,
     fileName,
-    source: 'zip',
+    source: 'file',
     sheetNames: [],
     sheets: {}
   })
@@ -478,25 +393,21 @@ describe('pairTemplateWorkbooks', () => {
 
   it('表号提不出的进 unmatched', () => {
     const res = pairTemplateWorkbooks([wb('R06.xls'), wb('附件2.xls')], [wb('NR06.xls')])
-    expect(res.pairs).toHaveLength(1)
     expect(res.unmatchedLeft).toEqual(['附件2.xls'])
   })
 
   it('同号多候选时不自动配对（交给人工）', () => {
-    const res = pairTemplateWorkbooks([wb('R06.xls')], [wb('NR06.xls'), wb('NR06-副本.xls', 'b')])
+    const res = pairTemplateWorkbooks([wb('R06.xls')], [wb('NR06.xls'), wb('NR06-副本.xls')])
     expect(res.pairs).toHaveLength(0)
     expect(res.unmatchedLeft).toEqual(['R06.xls'])
-    expect(res.unmatchedRight).toHaveLength(2)
   })
 
-  it('manualPairs 优先并占用名额', () => {
-    const res = pairTemplateWorkbooks(
-      [wb('R06.xls')],
-      [wb('NR06.xls'), wb('NR06-副本.xls', 'b')],
-      [{ leftId: 'R06.xls', rightId: 'b' }]
-    )
+  it('manualTablePairs 优先并占用名额', () => {
+    const res = pairTemplateWorkbooks([wb('R06.xls')], [wb('NR06.xls')], [
+      { leftId: 'R06.xls', rightId: 'NR06.xls' }
+    ])
     expect(res.pairs).toHaveLength(1)
-    expect(res.pairs[0].right.fileName).toBe('NR06-副本.xls')
-    expect(res.unmatchedRight).toEqual(['NR06.xls'])
+    expect(res.unmatchedLeft).toEqual([])
+    expect(res.unmatchedRight).toEqual([])
   })
 })

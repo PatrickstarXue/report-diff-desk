@@ -162,7 +162,7 @@ export interface ExportResult {
 
 // —— 表样核对 ——
 
-/** 单元格矩形范围（0 起始，含端点） */
+/** 单元格矩形范围（0 起始，含端点）；仅供锚点合并区裁剪使用 */
 export interface CellRange {
   r1: number
   c1: number
@@ -170,16 +170,29 @@ export interface CellRange {
   c2: number
 }
 
-/** 表样中的一个「数据格」及其行/列标签路径 */
+/** 规则表：位置键 `"row,col"`（0 起始）→ 规则值；空串表示该格不参与比对 */
+export type RuleTable = Record<string, string>
+
+/** 一对表的规则表 */
+export interface RuleTablePair {
+  left: RuleTable
+  right: RuleTable
+}
+
+/** 表样中的一个「数据格」 */
 export interface TemplateCellRef {
   /** 0 起始行号 */
   row: number
   /** 0 起始列号 */
   col: number
+  /** 行标签：正常为行路径（`贴现/银承/3个月（含）以内`），降级为 `第6行` */
   rowPath: string
+  /** 列标签：正常为列路径（`发生额`），降级为列字母（`D`） */
   colPath: string
   text: string
   num: number | null
+  /** 种子规则值 = `${rowPath}_${colPath}` */
+  seed: string
 }
 
 /** 一张表解析后的表样视图 */
@@ -191,23 +204,17 @@ export interface TemplateSheet {
   fileName: string
   workbookId: string
   sheetName: string
-  headerRange: CellRange
-  /** 标签列最大列号 */
-  labelEnd: number
-  dataStartRow: number
-  dataStartCol: number
-  /** 仅含「有值行」的全部数据格 */
   cells: TemplateCellRef[]
-  /** 表头范围来自人工指定而非锚点推断 */
-  manualHeader: boolean
+  /** 锚点未识别：cells 只有位置/文本/数值，行/列标签已退化为行列位置 */
+  degraded: boolean
   error?: string
 }
 
 export type TemplateDiffKind = 'diff' | 'left-only-value' | 'right-only-value'
 
 export interface TemplateDiff {
-  rowPath: string
-  colPath: string
+  /** 配对的规则值（两侧相同） */
+  rule: string
   leftRow: number
   leftCol: number
   rightRow: number
@@ -219,33 +226,34 @@ export interface TemplateDiff {
   /** |左-右| / max(|左|,|右|)；单侧有值时为 null */
   relDiff: number | null
   kind: TemplateDiffKind
-  /** 该条目由人工配对产生 */
-  manual?: boolean
 }
 
-/** 只在单侧存在的项（整行或整列在另一侧没有） */
-export interface TemplateOnlyEntry {
+/** 未配上的条目：格子 + 其生效规则值（规则表覆盖 > 种子） */
+export interface TemplateRuleEntry {
+  cell: TemplateCellRef
+  rule: string
+}
+
+/** 同一个规则值在一侧出现多次 → 该值整体不参与配对 */
+export interface TemplateDuplicateRule {
   side: 'left' | 'right'
-  rowPath: string
-  colPath: string
-  row: number
-  col: number
-  text: string
+  rule: string
+  count: number
 }
 
 export interface TemplatePairResult {
   tableNo: string | null
-  pairLabel: string
   leftFile: string
   rightFile: string
   left: TemplateSheet | null
   right: TemplateSheet | null
   diffs: TemplateDiff[]
-  onlyInLeft: TemplateOnlyEntry[]
-  onlyInRight: TemplateOnlyEntry[]
+  duplicateRules: TemplateDuplicateRule[]
+  /** 规则值只在左侧出现 */
+  onlyInLeft: TemplateRuleEntry[]
+  /** 规则值只在右侧出现 */
+  onlyInRight: TemplateRuleEntry[]
   totalCompared: number
-  /** 已套用的人工配对行对数（同一对行被多条规则指到只计一次） */
-  manualPairs: number
 }
 
 export interface TemplateCheckResult {
@@ -257,21 +265,11 @@ export interface TemplateCheckResult {
   generatedAt: string
 }
 
-/** 人工配对 / 忽略规则（坐标 0 起始，from* 指左侧、to* 指右侧） */
-export interface AlignPairRule {
-  left: string
-  right: string
-  fromRow: number
-  fromCol: number
-  toRow?: number
-  toCol?: number
-  ignored?: boolean
-}
-
+/** 规则表配置。v1（按坐标的人工配对/忽略）不做迁移，读到非 v2 一律按空配置 */
 export interface AlignConfig {
-  version: 1
-  templates: Record<string, { headerRange?: CellRange }>
-  pairs: AlignPairRule[]
+  version: 2
+  /** 键：`左表样键|右表样键` */
+  ruleTables: Record<string, RuleTablePair>
 }
 
 /** 手动指定的表对关系（表号提不出或冲突时用），仅本次生效 */
@@ -284,6 +282,8 @@ export interface TemplateCheckRequest {
   leftIds: string[]
   rightIds: string[]
   /** 优先于按表号自动配对 */
-  manualPairs?: TemplateTablePair[]
+  manualTablePairs?: TemplateTablePair[]
+  /** 已保存的规则表，按 `左键|右键` 索引；缺席的表对全部用种子 */
+  ruleTables?: Record<string, RuleTablePair>
   threshold: number
 }

@@ -21,6 +21,11 @@ export function colLetters(colCount: number): string[] {
   return out
 }
 
+/** 0 起始列号 → 列字母（0 → A、25 → Z、26 → AA） */
+export function colLetter(col: number): string {
+  return colLetters(col + 1)[col]
+}
+
 /**
  * el-table span-method 工厂：主格展开，被覆盖格隐藏；行号列（第 0 列）不参与合并。
  * @param getSpans 返回 span 矩阵（行 0 起始，与 data 行索引一致）

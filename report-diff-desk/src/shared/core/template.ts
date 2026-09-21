@@ -1,10 +1,10 @@
 import type {
-  AlignConfig,
   CellRange,
+  RuleTable,
+  RuleTablePair,
   SheetData,
   TemplateCellRef,
   TemplateDiff,
-  TemplateOnlyEntry,
   TemplatePairResult,
   TemplateSheet,
   TemplateTablePair,
@@ -12,6 +12,7 @@ import type {
 } from '../types'
 import { buildMergeSpans } from './merge'
 import { toNumeric } from './numeric'
+import { colLetter } from './sheet-view'
 
 /** 标签文本归一化：去首尾空白，内部连续空白压成单个空格 */
 export function normLabel(s: unknown): string {
@@ -66,6 +67,11 @@ function joinPath(parts: string[]): string {
   return out.join('/')
 }
 
+/** 种子规则值：行标签 + 列标签 */
+function ruleValueOf(rowPath: string, colPath: string): string {
+  return `${rowPath}_${colPath}`
+}
+
 /** 锚点：归一化文本等于「项 目」的格，左上优先 */
 function findAnchor(m: string[][]): { r: number; c: number } | null {
   for (let r = 0; r < m.length; r++) {
@@ -87,35 +93,51 @@ function clampRange(r: CellRange, sheet: SheetData): CellRange {
   }
 }
 
-/** 解析失败时的空表样（带 error），保证返回类型稳定 */
-function emptySheet(
-  base: Omit<TemplateSheet, 'headerRange' | 'labelEnd' | 'dataStartRow' | 'dataStartCol' | 'cells' | 'manualHeader'>,
-  error: string
+/**
+ * 降级解析：锚点缺失或表头区无数据列时使用。
+ * 只取全表可数值化的格（合并覆盖格跳过），行/列标签退化为行列位置。
+ */
+function degradedSheet(
+  base: Omit<TemplateSheet, 'cells' | 'degraded' | 'error'>,
+  sheet: SheetData,
+  error?: string
 ): TemplateSheet {
-  return {
-    ...base,
-    headerRange: { r1: 0, c1: 0, r2: 0, c2: 0 },
-    labelEnd: 0,
-    dataStartRow: 1,
-    dataStartCol: 1,
-    cells: [],
-    manualHeader: false,
-    error
+  const spans = buildMergeSpans(sheet.merges, sheet.rowCount, sheet.colCount)
+  const cells: TemplateCellRef[] = []
+  for (let r = 0; r < sheet.rowCount; r++) {
+    for (let c = 0; c < sheet.colCount; c++) {
+      if (spans[r]?.[c]?.rowspan === 0) continue
+      const raw = sheet.cells[r]?.[c] ?? null
+      const num = toNumeric(raw)
+      if (num === null) continue
+      const rowPath = `第${r + 1}行`
+      const colPath = colLetter(c)
+      cells.push({
+        row: r,
+        col: c,
+        rowPath,
+        colPath,
+        text: normLabel(raw?.v),
+        num,
+        seed: ruleValueOf(rowPath, colPath)
+      })
+    }
   }
+  return error ? { ...base, cells, degraded: true, error } : { ...base, cells, degraded: true }
 }
 
 /**
- * 解析单张表：定位表头区与标签列，提取「有值行」及其全部数据格。
- * 表头区默认由「项 目」锚点格的合并范围决定；cfg 中有该表样的人工范围时优先使用。
+ * 解析单张表：定位表头区与标签列，提取「有值行」及其全部数据格，并为每格生成种子规则值。
+ * 表头区由「项 目」锚点格的合并范围决定；找不到锚点时降级为全表位置解析，不再报错中止。
  */
-export function parseTemplateSheet(
-  input: { sheet: SheetData; fileName: string; workbookId: string },
-  cfg?: AlignConfig
-): TemplateSheet {
+export function parseTemplateSheet(input: {
+  sheet: SheetData
+  fileName: string
+  workbookId: string
+}): TemplateSheet {
   const { sheet, fileName, workbookId } = input
-  const key = templateKeyOf(fileName)
   const base = {
-    key,
+    key: templateKeyOf(fileName),
     tableNo: tableNoOf(fileName),
     fileName,
     workbookId,
@@ -123,35 +145,21 @@ export function parseTemplateSheet(
   }
 
   if (sheet.rowCount === 0 || sheet.colCount === 0) {
-    return emptySheet(base, '工作表为空')
+    return degradedSheet(base, sheet, '工作表为空')
   }
 
   const m = mergedLabelMatrix(sheet)
-  const manual = cfg?.templates?.[key]?.headerRange
-  let headerRange: CellRange
+  const a = findAnchor(m)
+  if (!a) return degradedSheet(base, sheet)
 
-  if (manual) {
-    headerRange = clampRange(manual, sheet)
-  } else {
-    const a = findAnchor(m)
-    if (!a) return emptySheet(base, '未找到「项 目」锚点，请手动指定表样范围')
-    const mg = (sheet.merges ?? []).find((x) => x.r1 === a.r && x.c1 === a.c)
-    headerRange = mg
-      ? clampRange({ r1: mg.r1, c1: mg.c1, r2: mg.r2, c2: mg.c2 }, sheet)
-      : { r1: a.r, c1: a.c, r2: a.r, c2: a.c }
-  }
+  const mg = (sheet.merges ?? []).find((x) => x.r1 === a.r && x.c1 === a.c)
+  const headerRange: CellRange = mg
+    ? clampRange({ r1: mg.r1, c1: mg.c1, r2: mg.r2, c2: mg.c2 }, sheet)
+    : { r1: a.r, c1: a.c, r2: a.r, c2: a.c }
 
   const labelEnd = headerRange.c2
   const dataStartRow = headerRange.r2 + 1
   const dataStartCol = labelEnd + 1
-  const partial = {
-    ...base,
-    headerRange,
-    labelEnd,
-    dataStartRow,
-    dataStartCol,
-    manualHeader: !!manual
-  }
 
   // 列路径：表头行范围内有标签的列才是数据列
   const colPaths = new Map<number, string>()
@@ -161,9 +169,8 @@ export function parseTemplateSheet(
     const p = joinPath(parts)
     if (p) colPaths.set(c, p)
   }
-  if (colPaths.size === 0) {
-    return { ...partial, cells: [], error: '表头区未识别到数据列，请手动指定表样范围' }
-  }
+  // 表头区找不到数据列时同样降级，让用户用规则表人工维护
+  if (colPaths.size === 0) return degradedSheet(base, sheet)
 
   const spans = buildMergeSpans(sheet.merges, sheet.rowCount, sheet.colCount)
   const cells: TemplateCellRef[] = []
@@ -177,40 +184,37 @@ export function parseTemplateSheet(
     for (const [c, colPath] of colPaths) {
       // 合并覆盖格跳过，值归主格，避免同一数值重复计数
       if (spans[r]?.[c]?.rowspan === 0) continue
-      const cell = sheet.cells[r]?.[c] ?? null
+      const raw = sheet.cells[r]?.[c] ?? null
       rowCells.push({
         row: r,
         col: c,
         rowPath,
         colPath,
-        text: normLabel(cell?.v),
-        num: toNumeric(cell)
+        text: normLabel(raw?.v),
+        num: toNumeric(raw),
+        seed: ruleValueOf(rowPath, colPath)
       })
     }
     // 有值行：至少一个数据格可数值化（注释行/表尾行因此被自然排除）
     if (rowCells.some((x) => x.num !== null)) cells.push(...rowCells)
   }
 
-  return { ...partial, cells }
+  return { ...base, cells, degraded: false }
 }
 
 /** 取工作簿第一个 sheet 解析（本项目报表均为单 sheet） */
-export function parseWorkbook(wb: WorkbookData, cfg?: AlignConfig): TemplateSheet {
+export function parseWorkbook(wb: WorkbookData): TemplateSheet {
   const name = wb.sheetNames[0]
   const sheet = name ? wb.sheets[name] : undefined
-  if (!sheet) {
-    return emptySheet(
-      {
-        key: templateKeyOf(wb.fileName),
-        tableNo: tableNoOf(wb.fileName),
-        fileName: wb.fileName,
-        workbookId: wb.id,
-        sheetName: ''
-      },
-      '工作簿中没有工作表'
-    )
+  const base = {
+    key: templateKeyOf(wb.fileName),
+    tableNo: tableNoOf(wb.fileName),
+    fileName: wb.fileName,
+    workbookId: wb.id,
+    sheetName: ''
   }
-  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id }, cfg)
+  if (!sheet) return { ...base, cells: [], degraded: true, error: '工作簿中没有工作表' }
+  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id })
 }
 
 /** 表对配对结果 */
@@ -221,19 +225,19 @@ export interface TemplatePairing {
 }
 
 /**
- * 按表号自动配对；manualPairs 指定的表对优先并占用名额。
+ * 按表号自动配对；manualTablePairs 指定的表对优先并占用名额。
  * 表号提不出或一侧出现多个同号候选时不自动配对，交给人工指定。
  */
 export function pairTemplateWorkbooks(
   left: WorkbookData[],
   right: WorkbookData[],
-  manualPairs: TemplateTablePair[] = []
+  manualTablePairs: TemplateTablePair[] = []
 ): TemplatePairing {
   const pairs: { left: WorkbookData; right: WorkbookData }[] = []
   const usedL = new Set<string>()
   const usedR = new Set<string>()
 
-  for (const mp of manualPairs) {
+  for (const mp of manualTablePairs) {
     const l = left.find((w) => w.id === mp.leftId)
     const r = right.find((w) => w.id === mp.rightId)
     if (!l || !r || usedL.has(l.id) || usedR.has(r.id)) continue
@@ -271,39 +275,45 @@ export function pairTemplateWorkbooks(
 
 export interface TemplateCheckOptions {
   threshold: number
-  config?: AlignConfig
+  /** 当前表对的规则表；缺席时全部用种子 */
+  ruleTable?: RuleTablePair
 }
 
-/** (行路径|列路径) → 单元格；同键重复时追加序号 #2、#3，避免静默错配 */
-function indexCells(cells: TemplateCellRef[]): Map<string, TemplateCellRef> {
-  const seen = new Map<string, number>()
-  const out = new Map<string, TemplateCellRef>()
+/** 生效规则值：规则表有该位置则以其为准（空串 = 不比对），否则用种子。比较前 trim */
+export function effectiveRule(table: RuleTable | undefined, cell: TemplateCellRef): string {
+  const v = table?.[`${cell.row},${cell.col}`]
+  return (v === undefined ? cell.seed : v).trim()
+}
+
+/** 规则值 → 该值对应的全部格子（空规则值不入索引） */
+function indexByRule(
+  cells: TemplateCellRef[],
+  table: RuleTable | undefined
+): Map<string, TemplateCellRef[]> {
+  const out = new Map<string, TemplateCellRef[]>()
   for (const c of cells) {
-    const base = `${c.rowPath} ${c.colPath}`
-    const n = (seen.get(base) ?? 0) + 1
-    seen.set(base, n)
-    out.set(n === 1 ? base : `${base} #${n}`, c)
+    const rule = effectiveRule(table, c)
+    if (!rule) continue
+    const list = out.get(rule)
+    if (list) list.push(c)
+    else out.set(rule, [c])
   }
   return out
 }
 
-function toOnly(side: 'left' | 'right', c: TemplateCellRef): TemplateOnlyEntry {
-  return { side, rowPath: c.rowPath, colPath: c.colPath, row: c.row, col: c.col, text: c.text }
-}
-
-/** 两侧同键单元格比值：命中阈值产出 diff，一侧为空产出单侧有值，其余跳过 */
+/** 两侧规则值相同的格比值：命中阈值产出 diff，一侧为空产出单侧有值，其余跳过 */
 function collect(
   out: TemplateDiff[],
   l: TemplateCellRef,
   r: TemplateCellRef,
+  rule: string,
   threshold: number
 ): void {
   const a = l.num
   const b = r.num
   if (a === null && b === null) return
   const common = {
-    rowPath: l.rowPath,
-    colPath: l.colPath,
+    rule,
     leftRow: l.row,
     leftCol: l.col,
     rightRow: r.row,
@@ -327,88 +337,15 @@ function collect(
   if (relDiff > threshold) out.push({ ...common, relDiff, kind: 'diff' })
 }
 
-const atLeft = (d: TemplateDiff, r: number, c: number): boolean =>
-  d.leftRow === r && d.leftCol === c
-
-/**
- * 套用人工配对与忽略名单。
- *
- * 配对是**行级**的：规则两端所在的行建立一对行对应关系，这两行不再看行路径，
- * 改按列路径逐列对齐重比，覆盖自动配对在这两行上的全部结果。成因是配不上时
- * 往往是整行丢了父级标签（R31 的 A6:B7 是空合并格 → 行路径只剩「单位存款」，
- * 而 NR31 是「一、活期/单位存款」），逐格配既费事又会漏掉没点到的列。
- *
- * 忽略是**格级**的：只移除该格结果，不建立行对。
- * 规则的表样键必须与当前表对一致，否则整条忽略（换了一套报表后旧规则自然失效，不误套）。
- */
-function applyRules(res: TemplatePairResult, cfg: AlignConfig | undefined, threshold: number): void {
-  const left = res.left
-  const right = res.right
-  if (!cfg || !left || !right || left.error || right.error) return
-  const rules = cfg.pairs.filter((p) => p.left === left.key && p.right === right.key)
-  if (rules.length === 0) return
-
-  // 忽略规则先只收集，等行对重比跑完再统一过滤：重比会按列路径把整行重新 collect 回来，
-  // 若在此之前过滤，被忽略的格会被重比重新加回（规格 3.3：先配对、后忽略）。
-  const ignoredAt: [number, number][] = []
-  const rowPairs: [number, number][] = []
-  for (const rule of rules) {
-    if (rule.ignored) {
-      ignoredAt.push([rule.fromRow, rule.fromCol])
-      continue
-    }
-    if (rule.toRow === undefined || rule.toCol === undefined) continue
-    // 同一对行可能被多条规则（不同列）指到，去重以免整行被重复比对
-    if (!rowPairs.some(([lr, rr]) => lr === rule.fromRow && rr === rule.toRow)) {
-      rowPairs.push([rule.fromRow, rule.toRow])
-    }
-  }
-
-  if (rowPairs.length > 0) {
-    const leftRows = new Set(rowPairs.map(([lr]) => lr))
-    const rightRows = new Set(rowPairs.map(([, rr]) => rr))
-    res.diffs = res.diffs.filter((d) => !leftRows.has(d.leftRow) && !rightRows.has(d.rightRow))
-    res.onlyInLeft = res.onlyInLeft.filter((e) => !leftRows.has(e.row))
-    res.onlyInRight = res.onlyInRight.filter((e) => !rightRows.has(e.row))
-
-    for (const [lr, rr] of rowPairs) {
-      res.manualPairs++ // 计数的是行对（用户实际做的配对次数），不是配成的格数
-      const byCol = new Map<string, TemplateCellRef>()
-      for (const c of right.cells) if (c.row === rr) byCol.set(c.colPath, c)
-      for (const l of left.cells) {
-        if (l.row !== lr) continue
-        const r = byCol.get(l.colPath)
-        if (!r) {
-          res.onlyInLeft.push(toOnly('left', l)) // 该列路径右侧没有，仍是仅单侧存在
-          continue
-        }
-        byCol.delete(l.colPath)
-        const before = res.diffs.length
-        collect(res.diffs, l, r, threshold)
-        if (res.diffs.length > before) res.diffs[res.diffs.length - 1].manual = true
-      }
-      for (const r of byCol.values()) res.onlyInRight.push(toOnly('right', r))
-    }
-  }
-
-  // 忽略恒以左侧坐标为键：重比后该左格只可能落在 diffs（命中右侧同列路径）或
-  // onlyInLeft（右侧无同列路径），不会变成 onlyInRight（其条目前提正是该左格不存在，
-  // 且携带的是右侧坐标），故 onlyInRight 不过滤。
-  for (const [r, c] of ignoredAt) {
-    res.diffs = res.diffs.filter((d) => !atLeft(d, r, c))
-    res.onlyInLeft = res.onlyInLeft.filter((e) => !(e.row === r && e.col === c))
-  }
-}
-
 function sortResult(res: TemplatePairResult): void {
-  const byPath = (a: { rowPath: string; colPath: string }, b: { rowPath: string; colPath: string }): number =>
-    a.rowPath.localeCompare(b.rowPath, 'zh') || a.colPath.localeCompare(b.colPath, 'zh')
-  res.diffs.sort(byPath)
-  res.onlyInLeft.sort(byPath)
-  res.onlyInRight.sort(byPath)
+  const byRule = (a: { rule: string }, b: { rule: string }): number =>
+    a.rule.localeCompare(b.rule, 'zh')
+  res.diffs.sort(byRule)
+  res.onlyInLeft.sort(byRule)
+  res.onlyInRight.sort(byRule)
 }
 
-/** 逐表配对并比对；左右任一解析失败时返回空结果（错误随 TemplateSheet.error 传出） */
+/** 逐表比对：按规则值等值配对；左右任一解析失败时返回空结果（错误随 TemplateSheet.error 传出） */
 export function checkTemplates(
   left: TemplateSheet,
   right: TemplateSheet,
@@ -416,36 +353,51 @@ export function checkTemplates(
 ): TemplatePairResult {
   const res: TemplatePairResult = {
     tableNo: left.tableNo ?? right.tableNo,
-    pairLabel: `${left.fileName} ↔ ${right.fileName}`,
     leftFile: left.fileName,
     rightFile: right.fileName,
     left,
     right,
     diffs: [],
+    duplicateRules: [],
     onlyInLeft: [],
     onlyInRight: [],
-    totalCompared: 0,
-    manualPairs: 0
+    totalCompared: 0
   }
   if (left.error || right.error) return res
 
-  const li = indexCells(left.cells)
-  const ri = indexCells(right.cells)
+  const li = indexByRule(left.cells, opts.ruleTable?.left)
+  const ri = indexByRule(right.cells, opts.ruleTable?.right)
 
-  for (const [k, lc] of li) {
-    const rc = ri.get(k)
-    if (!rc) {
-      res.onlyInLeft.push(toOnly('left', lc))
-      continue
+  // 规则值重复的整值不参与配对（用户在「规则值重复」里能看到并去修），因此也不进「未配上」
+  const dup = new Set<string>()
+  for (const [rule, cs] of li) {
+    if (cs.length > 1) {
+      dup.add(rule)
+      res.duplicateRules.push({ side: 'left', rule, count: cs.length })
     }
-    res.totalCompared++
-    collect(res.diffs, lc, rc, opts.threshold)
   }
-  for (const [k, rc] of ri) {
-    if (!li.has(k)) res.onlyInRight.push(toOnly('right', rc))
+  for (const [rule, cs] of ri) {
+    if (cs.length > 1) {
+      dup.add(rule)
+      res.duplicateRules.push({ side: 'right', rule, count: cs.length })
+    }
   }
 
-  applyRules(res, opts.config, opts.threshold)
+  for (const [rule, cs] of li) {
+    if (dup.has(rule)) continue
+    const r = ri.get(rule)
+    if (r) {
+      res.totalCompared++
+      collect(res.diffs, cs[0], r[0], rule, opts.threshold)
+    } else {
+      res.onlyInLeft.push({ cell: cs[0], rule })
+    }
+  }
+  for (const [rule, cs] of ri) {
+    if (dup.has(rule) || li.has(rule)) continue
+    res.onlyInRight.push({ cell: cs[0], rule })
+  }
+
   sortResult(res)
   return res
 }
