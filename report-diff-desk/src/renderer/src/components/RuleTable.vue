@@ -39,16 +39,21 @@ const positions = computed(() => {
   }
 })
 
-const rowList = computed(() =>
-  hasCells.value
-    ? [...new Set(props.cells.map((c) => c.row))].sort((a, b) => a - b)
-    : positions.value.rows
-)
-const colList = computed(() =>
-  hasCells.value
-    ? [...new Set(props.cells.map((c) => c.col))].sort((a, b) => a - b)
-    : positions.value.cols
-)
+/**
+ * 行/列 = 当前解析出的格 ∪ 草稿里的位置。
+ * 存档可能含当前解析产不出的格（锚点词不对时解析会降级，只剩有数值的格），
+ * 只按解析结果排行列的话，这些存档格就整片看不见——「恢复存档规则」看着像没生效。
+ */
+const rowList = computed(() => {
+  const rows = new Set(props.cells.map((c) => c.row))
+  for (const r of positions.value.rows) rows.add(r)
+  return [...rows].sort((a, b) => a - b)
+})
+const colList = computed(() => {
+  const cols = new Set(props.cells.map((c) => c.col))
+  for (const c of positions.value.cols) cols.add(c)
+  return [...cols].sort((a, b) => a - b)
+})
 
 /** (row,col) → 该格的标签来源 */
 const cellAt = computed(() => {
@@ -57,10 +62,26 @@ const cellAt = computed(() => {
   return m
 })
 
-const rowLabel = (row: number): string =>
-  cellAt.value.get(`${row},${colList.value[0]}`)?.rowPath ?? `第${row + 1}行`
-const colLabel = (col: number): string =>
-  cellAt.value.get(`${rowList.value[0]},${col}`)?.colPath ?? colLetter(col)
+/** 行/列标签取该行/该列任意一个解析出的格（按列号/行号最小的），别绑死第一列/第一行 */
+const repByRow = computed(() => {
+  const m = new Map<number, TemplateCellRef>()
+  for (const c of props.cells) {
+    const cur = m.get(c.row)
+    if (!cur || c.col < cur.col) m.set(c.row, c)
+  }
+  return m
+})
+const repByCol = computed(() => {
+  const m = new Map<number, TemplateCellRef>()
+  for (const c of props.cells) {
+    const cur = m.get(c.col)
+    if (!cur || c.row < cur.row) m.set(c.col, c)
+  }
+  return m
+})
+
+const rowLabel = (row: number): string => repByRow.value.get(row)?.rowPath ?? `第${row + 1}行`
+const colLabel = (col: number): string => repByCol.value.get(col)?.colPath ?? colLetter(col)
 
 /** 该位置是否有数据格（可编辑视图）；只读预览时以已保存的键为准 */
 function exists(row: number, col: number): boolean {
@@ -205,6 +226,7 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
                 'not-exist': !c.exists,
                 matched: c.exists && peerValues.has(valueAt(r.row, c.col).trim())
               }"
+              :title="c.exists ? undefined : '当前报表没解析到这一格（灰底、不可编辑）'"
               @click="startEdit(r.row, c.col)"
             >
               <el-input
@@ -215,7 +237,8 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
                 @blur="commitEdit"
                 @keyup.enter="commitEdit"
               />
-              <template v-else>{{ c.exists ? valueAt(r.row, c.col) : '' }}</template>
+              <!-- 解析没产出的格也照显示草稿值（存档可能还留着），空串就还是空的 -->
+              <template v-else>{{ valueAt(r.row, c.col) }}</template>
             </td>
           </tr>
         </tbody>
