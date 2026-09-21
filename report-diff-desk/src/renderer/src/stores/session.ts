@@ -48,8 +48,11 @@ interface SessionState {
   templateResult: TemplateCheckResult | null
   /** 表样核对的相对差阈值（小数，0.0001 = 0.01%） */
   templateThreshold: number
-  /** 锚点词输入（逗号分隔多个候选）；空则回落到默认「项目」 */
-  anchorText: string
+  /**
+   * 锚点词列表（界面里是一排可删的标签）。
+   * 每个报表各自取「自己表里第一个命中的词」，所以多个报表族的锚点互不影响。
+   */
+  anchors: string[]
   /** 当前查看的表对索引 */
   templatePairIndex: number
   /** 网格当前显示哪一侧 */
@@ -89,7 +92,7 @@ export const useSessionStore = defineStore('session', {
     templateRightPath: '',
     templateResult: null,
     templateThreshold: 0.0001,
-    anchorText: DEFAULT_ANCHORS.join('、'),
+    anchors: [...DEFAULT_ANCHORS],
     templatePairIndex: 0,
     templateSide: 'left',
     templateFocus: null,
@@ -138,12 +141,9 @@ export const useSessionStore = defineStore('session', {
       return this.ruleDrafts[this.activeRuleKey] ?? null
     },
 
-    /** 锚点词候选：按输入顺序尝试；全为空时用默认「项目」 */
-    anchorList(): string[] {
-      const list = this.anchorText
-        .split(/[,，、;；]+/)
-        .map((s) => s.trim())
-        .filter(Boolean)
+    /** 生效的锚点词：按顺序尝试，每个报表取自己命中的那个；全为空时用默认「项目」 */
+    effectiveAnchors(): string[] {
+      const list = this.anchors.map((s) => s.trim()).filter(Boolean)
       return list.length > 0 ? list : [...DEFAULT_ANCHORS]
     }
   },
@@ -338,7 +338,7 @@ export const useSessionStore = defineStore('session', {
           rightIds: this.templateRight.map((w) => w.id),
           manualTablePairs: this.manualTablePairs,
           ruleTables: merged,
-          anchors: this.anchorList,
+          anchors: this.effectiveAnchors,
           threshold: this.templateThreshold
         }
         // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
@@ -354,7 +354,7 @@ export const useSessionStore = defineStore('session', {
     /** 读取规则表配置；失败时如实抛出（alignConfig 保持 null），由调用方提示用户，避免空基准覆盖盘上规则 */
     async reloadAlignConfig(): Promise<void> {
       this.alignConfig = await window.api.getAlignConfig()
-      if (this.alignConfig.anchors?.length) this.anchorText = this.alignConfig.anchors.join('、')
+      this.anchors = this.alignConfig.anchors?.length ? [...this.alignConfig.anchors] : [...DEFAULT_ANCHORS]
     },
 
     /** 保存锚点词到配置（与规则表同一份文件）。配置没读进来时不写，避免覆盖盘上内容 */
@@ -365,7 +365,7 @@ export const useSessionStore = defineStore('session', {
         version: 2,
         // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
         ruleTables: JSON.parse(JSON.stringify(base.ruleTables)) as Record<string, RuleTablePair>,
-        anchors: [...this.anchorList]
+        anchors: [...this.effectiveAnchors]
       }
       await window.api.setAlignConfig(cfg)
       this.alignConfig = cfg
@@ -416,7 +416,7 @@ export const useSessionStore = defineStore('session', {
         ruleTables: JSON.parse(
           JSON.stringify({ ...base.ruleTables, [key]: draft })
         ) as Record<string, RuleTablePair>,
-        anchors: [...this.anchorList]
+        anchors: [...this.effectiveAnchors]
       }
       await window.api.setAlignConfig(cfg)
       this.alignConfig = cfg

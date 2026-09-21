@@ -207,8 +207,8 @@ export interface TemplateSheet {
   cells: TemplateCellRef[]
   /** 锚点未识别：cells 只有位置/文本/数值，行/列标签已退化为行列位置 */
   degraded: boolean
-  /** 锚点命中的格（0 起始），供界面提示「锚点落在哪」；降级时缺席 */
-  anchor?: { row: number; col: number }
+  /** 锚点命中的格（0 起始）与命中的候选词，供界面提示「这个报表认的是哪个词」；降级时缺席 */
+  anchor?: { row: number; col: number; word: string }
   error?: string
 }
 

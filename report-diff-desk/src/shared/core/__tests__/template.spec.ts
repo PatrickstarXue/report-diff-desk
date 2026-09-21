@@ -136,7 +136,7 @@ describe('parseTemplateSheet', () => {
     expect(t.cells[0].rowPath).toBe('贴现/银承/3个月')
     expect(t.cells[0].colPath).toBe('发生额')
     expect(t.cells[0].seed).toBe('贴现/银承/3个月_发生额')
-    expect(t.anchor).toEqual({ row: 3, col: 0 })
+    expect(t.anchor).toEqual({ row: 3, col: 0, word: '项目' })
   })
 
   it('行路径由标签列各段拼接，合并格向下填充', () => {

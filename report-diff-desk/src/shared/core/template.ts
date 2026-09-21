@@ -89,12 +89,12 @@ function resolveAnchors(anchors?: string[]): string[] {
 }
 
 /** 锚点：归一化文本命中候选词的格；按候选词顺序尝试，每个词左上优先 */
-function findAnchor(m: string[][], anchors: string[]): { r: number; c: number } | null {
+function findAnchor(m: string[][], anchors: string[]): { r: number; c: number; word: string } | null {
   for (const word of anchors) {
     const want = bareLabel(word)
     for (let r = 0; r < m.length; r++) {
       for (let c = 0; c < m[r].length; c++) {
-        if (bareLabel(m[r][c]) === want) return { r, c }
+        if (bareLabel(m[r][c]) === want) return { r, c, word }
       }
     }
   }
@@ -223,7 +223,7 @@ export function parseTemplateSheet(input: {
     if (rowCells.length > 0) cells.push(...rowCells)
   }
 
-  return { ...base, cells, degraded: false, anchor: { row: a.r, col: a.c } }
+  return { ...base, cells, degraded: false, anchor: { row: a.r, col: a.c, word: a.word } }
 }
 
 /** 取工作簿第一个 sheet 解析（本项目报表均为单 sheet） */

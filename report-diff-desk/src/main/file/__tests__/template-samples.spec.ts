@@ -11,6 +11,10 @@ const FILES = ['R06.xls', 'NR06.xls', 'R31.xls', 'NR31.xls']
 /** 真实样例缺失时整组跳过（samples/ 在 .gitignore 里，不保证每台机器都有） */
 const hasSamples = FILES.every((f) => existsSync(resolve(DIR, f)))
 
+/** R21/NR21：表头行是「期限(c0-c1) | 机构类别(c2) | 金额(c3)…」，锚点必须落在最后一个标签列 c2 */
+const FILES21 = ['R21.xls', 'NR21.xls']
+const hasSamples21 = FILES21.every((f) => existsSync(resolve(DIR, f)))
+
 /** 走生产解析路径，不用测试自造的对象 */
 function load(name: string): WorkbookData {
   return parseExcel(readFileSync(resolve(DIR, name)), name, 'file')
@@ -115,12 +119,21 @@ describe.skipIf(!hasSamples)('表样核对 · 真实样例端到端', () => {
     const res = checkTemplates(l, r, { threshold: T, ruleTable })
     expect(res.diffs.some((d) => d.leftText === '1.2')).toBe(false)
   })
+
+  it.skipIf(!hasSamples21)('一份锚点词列表同时覆盖两种报表，互不影响', () => {
+    const anchors = ['项目', '机构类别']
+    const r06 = parseWorkbook(load('R06.xls'), anchors)
+    const r21 = parseWorkbook(load('R21.xls'), anchors)
+    // 各报表取自己命中的那个词
+    expect(r06.degraded).toBe(false)
+    expect(r06.anchor).toEqual({ row: 3, col: 0, word: '项目' })
+    expect(r21.degraded).toBe(false)
+    expect(r21.anchor).toEqual({ row: 3, col: 2, word: '机构类别' })
+    // R06 的规则值仍是被自己的锚点解析出来的路径形式
+    expect(r06.cells.some((c) => c.seed === '贴现/银行承兑汇票/3个月（含）以内_发生额')).toBe(true)
+  })
 })
 
-const FILES21 = ['R21.xls', 'NR21.xls']
-const hasSamples21 = FILES21.every((f) => existsSync(resolve(DIR, f)))
-
-/** R21/NR21 的表头行是「期限(c0-c1) | 机构类别(c2) | 金额(c3)…」，锚点必须落在最后一个标签列 c2 */
 describe.skipIf(!hasSamples21)('表样核对 · 锚点落在最后一个标签列（R21/NR21）', () => {
   const load21 = (name: string): TemplateSheet =>
     parseWorkbook(parseExcel(readFileSync(resolve(DIR, name)), name, 'file'), ['机构类别'])
@@ -128,7 +141,7 @@ describe.skipIf(!hasSamples21)('表样核对 · 锚点落在最后一个标签�
   it('锚点命中「机构类别」，规则值即「左侧标签路径_上侧列标签」', () => {
     const t = load21('R21.xls')
     expect(t.degraded).toBe(false)
-    expect(t.anchor).toEqual({ row: 3, col: 2 })
+    expect(t.anchor).toEqual({ row: 3, col: 2, word: '机构类别' })
     const c = cellAt(t, 4, 3)
     expect(c?.rowPath).toBe('活期/其他存款性公司')
     expect(c?.colPath).toBe('金额')
@@ -147,7 +160,7 @@ describe.skipIf(!hasSamples21)('表样核对 · 锚点落在最后一个标签�
 
   it('锚点选在非最后一个标签列（期限）时标签维度被挤掉：值退化成「活期_金额」并大量重复', () => {
     const l = parseWorkbook(parseExcel(readFileSync(resolve(DIR, 'R21.xls')), 'R21.xls', 'file'), ['期限'])
-    expect(l.anchor).toEqual({ row: 3, col: 0 })
+    expect(l.anchor).toEqual({ row: 3, col: 0, word: '期限' })
     expect(l.cells.some((c) => c.seed === '活期_金额')).toBe(true)
     const res = checkTemplates(
       l,

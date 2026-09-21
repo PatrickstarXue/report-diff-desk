@@ -99,7 +99,7 @@ const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.e
 /** 锚点未识别、已按行列位置降级解析：种子是「第N行_列字母」，需人工在规则表里对齐 */
 const degradedHint = computed(() =>
   pair.value?.left?.degraded || pair.value?.right?.degraded
-    ? `该表对有一侧没能识别到锚点「${session.anchorList.join('、')}」——若这份报表的标签区左上角用的是别的词（如「期限」），把它填到上方「锚点词」再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
+    ? `该表对有一侧没能识别到锚点词「${session.effectiveAnchors.join('、')}」——若这份报表的标签区右下角用的是别的词（如「机构类别」），把它加到上方「锚点词」里再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
     : ''
 )
 
@@ -110,9 +110,9 @@ const anchorPos = computed(() => {
   if (!p.left?.anchor && !p.right?.anchor) return ''
   const at = (t: TemplateSheet | null | undefined, name: string): string => {
     const a = t?.anchor
-    return a ? `${name} ${colLetter(a.col)}${a.row + 1}` : `${name} 未识别到`
+    return a ? `${name}「${a.word}」(${colLetter(a.col)}${a.row + 1})` : `${name} 未识别到`
   }
-  return `当前锚点命中：${at(p.left, '左侧')}，${at(p.right, '右侧')}`
+  return `锚点命中位置：${at(p.left, '左侧')}，${at(p.right, '右侧')}`
 })
 
 /** 锚点词改动落盘（失焦 / 回车触发）；配置没读进来时 saveAnchors 静默跳过 */
@@ -227,9 +227,9 @@ function onSideChange(v: string | number | boolean | undefined): void {
         :precision="4"
         size="small"
       />
-      <span class="hint">锚点词（标签区左上角的文字，多个用「、」分隔）</span>
-      <el-input
-        v-model="session.anchorText"
+      <span class="hint">锚点词（可加多个，每份报表各取自己命中的那个）</span>
+      <el-input-tag
+        v-model="session.anchors"
         size="small"
         class="anchor-input"
         placeholder="项目"
@@ -424,7 +424,7 @@ function onSideChange(v: string | number | boolean | undefined): void {
   width: 200px;
 }
 .anchor-input {
-  width: 140px;
+  width: 260px;
 }
 .only-collapse {
   margin-top: 4px;

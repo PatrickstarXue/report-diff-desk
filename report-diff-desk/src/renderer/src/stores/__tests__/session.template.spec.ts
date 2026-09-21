@@ -190,37 +190,36 @@ describe('规则表草稿', () => {
 })
 
 describe('锚点词', () => {
-  it('按顿号/逗号切分多个候选；空输入回落到默认「项目」', () => {
+  it('默认「项目」；清空后生效值回落到默认', () => {
     const s = useSessionStore()
-    expect(s.anchorList).toEqual(['项目'])
-    s.anchorText = '期限、科目'
-    expect(s.anchorList).toEqual(['期限', '科目'])
-    s.anchorText = '   '
-    expect(s.anchorList).toEqual(['项目'])
+    expect(s.anchors).toEqual(['项目'])
+    expect(s.effectiveAnchors).toEqual(['项目'])
+    s.anchors = []
+    expect(s.effectiveAnchors).toEqual(['项目'])
   })
 
-  it('核对请求带上锚点词候选', async () => {
+  it('列表里的多个词随核对请求一起发出（各报表自取命中项）', async () => {
     const s = useSessionStore()
     s.templateLeft = [wb('L', 'R06.xls')]
     s.templateRight = [wb('R', 'NR06.xls')]
-    s.anchorText = '期限'
+    s.anchors = ['项目', '机构类别']
     await s.runTemplateCheck()
-    expect(lastRequest.anchors).toEqual(['期限'])
+    expect(lastRequest.anchors).toEqual(['项目', '机构类别'])
   })
 
-  it('reloadAlignConfig 回填输入框；saveAnchors 写盘且不动已有规则表', async () => {
+  it('reloadAlignConfig 回填列表（盘上没有就用默认）；saveAnchors 写盘且不动已有规则表', async () => {
     storedConfig = {
       version: 2,
       ruleTables: { 'R06|NR06': { left: { '5,3': '甲_乙' }, right: {} } },
-      anchors: ['期限']
+      anchors: ['机构类别']
     }
     const s = useSessionStore()
     await s.reloadAlignConfig()
-    expect(s.anchorText).toBe('期限')
-    s.anchorText = '期限、科目'
+    expect(s.anchors).toEqual(['机构类别'])
+    s.anchors = ['项目', '机构类别']
     await s.saveAnchors()
     expect(setCalls).toHaveLength(1)
-    expect(setCalls[0].anchors).toEqual(['期限', '科目'])
+    expect(setCalls[0].anchors).toEqual(['项目', '机构类别'])
     expect(setCalls[0].ruleTables['R06|NR06'].left['5,3']).toBe('甲_乙')
   })
 
@@ -229,11 +228,11 @@ describe('锚点词', () => {
     s.templateLeft = [wb('L', 'R06.xls')]
     s.templateRight = [wb('R', 'NR06.xls')]
     s.alignConfig = await window.api.getAlignConfig()
-    s.anchorText = '期限'
+    s.anchors = ['项目', '机构类别']
     await s.runTemplateCheck()
     s.initRuleDraft()
     await s.saveRuleTable()
     expect(setCalls).toHaveLength(1)
-    expect(setCalls[0].anchors).toEqual(['期限'])
+    expect(setCalls[0].anchors).toEqual(['项目', '机构类别'])
   })
 })
