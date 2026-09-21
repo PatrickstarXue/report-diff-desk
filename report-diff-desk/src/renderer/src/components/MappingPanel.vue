@@ -24,13 +24,26 @@ function onOverviewResize(deltaY: number): void {
   overviewHeight.value = Math.max(120, resizeStartH + deltaY)
 }
 
-// 网格跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
+/** 本次选中是否由页内点击产生：是的话格子本就在眼前，不该再动滚动条 */
+let pickedLocally = false
+
+/** 行高从 DOM 实测：写死 28px 会让跳转落点偏上（小尺寸表格换行后远大于 28） */
+function measuredRowHeight(): number {
+  const row = overviewRef.value?.querySelector<HTMLElement>('.el-table__body tbody tr')
+  return row?.offsetHeight || 28
+}
+
+// 从网格高亮页跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
 watch(
   () => session.selectedDocCell,
   (sel) => {
     if (!sel) return
+    if (pickedLocally) {
+      pickedLocally = false
+      return
+    }
     setTimeout(() => {
-      overviewRef.value?.scrollTo({ top: Math.max(0, (sel.row - 3) * 28) })
+      overviewRef.value?.scrollTo({ top: Math.max(0, (sel.row - 3) * measuredRowHeight()) })
     }, 100)
   }
 )
@@ -94,6 +107,7 @@ function onCellClick(row: { _row: number }, column: { property?: string }): void
   const raw = activeSheet.value?.cells[row._row - 1]?.[c] ?? null
   const value = cellText(raw)
   if (!value) return
+  pickedLocally = true // 抑制跳转滚动：格子在页内本来就看得见
   session.selectDocCell(row._row, c + 1, value)
 }
 
