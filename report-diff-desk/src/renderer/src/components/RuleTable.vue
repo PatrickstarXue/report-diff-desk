@@ -80,8 +80,26 @@ const repByCol = computed(() => {
   return m
 })
 
-const rowLabel = (row: number): string => repByRow.value.get(row)?.rowPath ?? `第${row + 1}行`
-const colLabel = (col: number): string => repByCol.value.get(col)?.colPath ?? colLetter(col)
+/**
+ * 行/列标签优先取草稿里的规则值（规则值的两半就是行/列规则），
+ * 其次才用解析出的路径——锚点词不对时解析降级成「第N行」，而存档里的行规则是对的。
+ */
+function rowLabel(row: number): string {
+  for (const col of colList.value) {
+    const v = props.modelValue[`${row},${col}`]?.trim()
+    const part = v ? splitRuleValue(v).row : ''
+    if (part) return part
+  }
+  return repByRow.value.get(row)?.rowPath ?? `第${row + 1}行`
+}
+function colLabel(col: number): string {
+  for (const row of rowList.value) {
+    const v = props.modelValue[`${row},${col}`]?.trim()
+    const part = v ? splitRuleValue(v).col : ''
+    if (part) return part
+  }
+  return repByCol.value.get(col)?.colPath ?? colLetter(col)
+}
 
 /** 该位置是否有数据格（可编辑视图）；只读预览时以已保存的键为准 */
 function exists(row: number, col: number): boolean {

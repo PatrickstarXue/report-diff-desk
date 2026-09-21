@@ -240,10 +240,12 @@ export function registerIpc(): void {
       )
       const pairs = pairing.pairs.map((p) => {
         const key = `${templateKeyOf(p.left.fileName)}|${templateKeyOf(p.right.fileName)}`
-        return checkTemplates(parseWorkbook(p.left, anchors), parseWorkbook(p.right, anchors), {
-          threshold,
-          ruleTable: req.ruleTables?.[key]
-        })
+        const rt = req.ruleTables?.[key]
+        return checkTemplates(
+          parseWorkbook(p.left, anchors, rt?.left),
+          parseWorkbook(p.right, anchors, rt?.right),
+          { threshold, ruleTable: rt }
+        )
       })
       pairs.sort((a, b) => (a.tableNo ?? '').localeCompare(b.tableNo ?? '', undefined, { numeric: true }))
 

@@ -315,6 +315,54 @@ describe('parseTemplateSheet', () => {
 
 // ——— 规则值与生效值 ———
 
+describe('规则表补格（存过的规则不因本次解析降级而失效）', () => {
+  it('规则表里有、解析没产出的位置照样成格：标签取自规则值两半，值取自原表', () => {
+    // 只有「项目」锚点而表头区没有数据列标签 → 解析降级；(5,2) 是文本格，降级不产出
+    const s = sheetOf(8, 4, [[3, 0, '项目'], [5, 2, '甲']], [{ r1: 3, c1: 0, r2: 3, c2: 1 }])
+    const t = parseTemplateSheet({
+      sheet: s,
+      fileName: 'R06.xls',
+      workbookId: 'w1',
+      ruleTable: { '5,2': '活期/其他存款性公司_机构类别' }
+    })
+    expect(t.degraded).toBe(true)
+    const c = t.cells.find((x) => x.row === 5 && x.col === 2)
+    expect(c?.rowPath).toBe('活期/其他存款性公司')
+    expect(c?.colPath).toBe('机构类别')
+    expect(c?.text).toBe('甲')
+  })
+
+  it('越界的存档位置（报表改过行数）跳过，不造假格', () => {
+    const t = parseTemplateSheet({
+      sheet: sheetOf(3, 3, [[1, 1, '甲']]),
+      fileName: 'R06.xls',
+      workbookId: 'w1',
+      ruleTable: { '99,9': 'X_Y' }
+    })
+    expect(t.cells).toEqual([])
+  })
+
+  it('补出来的格照样配对：一侧有值、一侧空格 → 单侧有值，而不是未配上', () => {
+    const mk = (v: number | null): SheetData => sheetOf(3, 3, [[1, 1, '锚'], [1, 2, v]])
+    const rt = { '1,2': '甲_金额' }
+    const left = parseTemplateSheet({
+      sheet: mk(5), fileName: 'R06.xls', workbookId: 'w1', ruleTable: rt
+    })
+    const right = parseTemplateSheet({
+      sheet: mk(null), fileName: 'NR06.xls', workbookId: 'w2', ruleTable: rt
+    })
+    // 规则表要同时交给解析（补格）与比对（生效规则值），主进程两处都传
+    const res = checkTemplates(left, right, {
+      threshold: 0.0001,
+      ruleTable: { left: rt, right: rt }
+    })
+    expect(res.totalCompared).toBe(1)
+    expect(res.diffs.map((d) => d.kind)).toEqual(['left-only-value'])
+    expect(res.onlyInLeft).toEqual([])
+    expect(res.onlyInRight).toEqual([])
+  })
+})
+
 describe('规则值拆半（界面「只改行 / 只改列」批量用）', () => {
   it('ruleValueOf 拼装：行标签_列标签', () => {
     expect(ruleValueOf('活期/其他存款性公司', '金额')).toBe('活期/其他存款性公司_金额')

@@ -161,6 +161,40 @@ function degradedSheet(
 }
 
 /**
+ * 补上「规则表里有、这次解析没产出」的位置。
+ * 规则表是权威：用户存过的规则（可能是在锚点词正确的某次里存下来的）不该因为
+ * 这一次解析降级就失效——那些格照样要参与比对，行/列标签直接取自规则值的两半。
+ * 值从原表按位置取；越界（报表改过行数）的位置跳过。
+ */
+function withRuleTableCells(
+  sheet: SheetData,
+  parsed: TemplateCellRef[],
+  ruleTable?: RuleTable
+): TemplateCellRef[] {
+  if (!ruleTable) return parsed
+  const have = new Set(parsed.map((c) => `${c.row},${c.col}`))
+  const out = [...parsed]
+  for (const [pos, rule] of Object.entries(ruleTable)) {
+    if (have.has(pos) || !rule.trim()) continue // 空串 = 不比对，不必造格
+    const [r, c] = pos.split(',').map(Number)
+    if (!Number.isInteger(r) || !Number.isInteger(c)) continue
+    if (r < 0 || c < 0 || r >= sheet.rowCount || c >= sheet.colCount) continue
+    const raw = sheet.cells[r]?.[c] ?? null
+    const { row: rowPart, col: colPart } = splitRuleValue(rule.trim())
+    out.push({
+      row: r,
+      col: c,
+      rowPath: rowPart || `第${r + 1}行`,
+      colPath: colPart || colLetter(c),
+      text: normLabel(raw?.v),
+      num: toNumeric(raw),
+      seed: rule.trim()
+    })
+  }
+  return out
+}
+
+/**
  * 解析单张表：定位表头区与标签列，提取「有值行」及其全部数据格，并为每格生成种子规则值。
  * 表头区由锚点格（文本命中锚点词，默认「项目」）的合并范围决定；
  * 找不到锚点时降级为全表位置解析，不再报错中止。
@@ -171,8 +205,10 @@ export function parseTemplateSheet(input: {
   workbookId: string
   /** 锚点词候选，按序尝试；缺席或全是空串时用默认「项目」 */
   anchors?: string[]
+  /** 该侧已存的规则表（`"row,col"` → 规则值）：里面有、本次解析没产出的位置照样补成格 */
+  ruleTable?: RuleTable
 }): TemplateSheet {
-  const { sheet, fileName, workbookId, anchors } = input
+  const { sheet, fileName, workbookId, anchors, ruleTable } = input
   const base = {
     key: templateKeyOf(fileName),
     tableNo: tableNoOf(fileName),
@@ -180,14 +216,18 @@ export function parseTemplateSheet(input: {
     workbookId,
     sheetName: sheet.name
   }
+  const finish = (t: TemplateSheet): TemplateSheet => ({
+    ...t,
+    cells: withRuleTableCells(sheet, t.cells, ruleTable)
+  })
 
   if (sheet.rowCount === 0 || sheet.colCount === 0) {
-    return degradedSheet(base, sheet, '工作表为空')
+    return finish(degradedSheet(base, sheet, '工作表为空'))
   }
 
   const m = mergedLabelMatrix(sheet)
   const a = findAnchor(m, resolveAnchors(anchors))
-  if (!a) return degradedSheet(base, sheet)
+  if (!a) return finish(degradedSheet(base, sheet))
 
   const mg = (sheet.merges ?? []).find((x) => x.r1 === a.r && x.c1 === a.c)
   const headerRange: CellRange = mg
@@ -207,7 +247,7 @@ export function parseTemplateSheet(input: {
     if (p) colPaths.set(c, p)
   }
   // 表头区找不到数据列时同样降级，让用户用规则表人工维护
-  if (colPaths.size === 0) return degradedSheet(base, sheet)
+  if (colPaths.size === 0) return finish(degradedSheet(base, sheet))
 
   const spans = buildMergeSpans(sheet.merges, sheet.rowCount, sheet.colCount)
   const cells: TemplateCellRef[] = []
@@ -238,11 +278,15 @@ export function parseTemplateSheet(input: {
     if (rowCells.length > 0) cells.push(...rowCells)
   }
 
-  return { ...base, cells, degraded: false, anchor: { row: a.r, col: a.c, word: a.word } }
+  return finish({ ...base, cells, degraded: false, anchor: { row: a.r, col: a.c, word: a.word } })
 }
 
 /** 取工作簿第一个 sheet 解析（本项目报表均为单 sheet） */
-export function parseWorkbook(wb: WorkbookData, anchors?: string[]): TemplateSheet {
+export function parseWorkbook(
+  wb: WorkbookData,
+  anchors?: string[],
+  ruleTable?: RuleTable
+): TemplateSheet {
   const name = wb.sheetNames[0]
   const sheet = name ? wb.sheets[name] : undefined
   const base = {
@@ -253,7 +297,7 @@ export function parseWorkbook(wb: WorkbookData, anchors?: string[]): TemplateShe
     sheetName: ''
   }
   if (!sheet) return { ...base, cells: [], degraded: true, error: '工作簿中没有工作表' }
-  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id, anchors })
+  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id, anchors, ruleTable })
 }
 
 /** 表对配对结果 */
