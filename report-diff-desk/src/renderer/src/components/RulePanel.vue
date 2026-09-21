@@ -122,14 +122,32 @@ async function save(): Promise<void> {
 
 async function reseed(): Promise<void> {
   try {
-    await ElMessageBox.confirm('丢弃对规则表的人工修改，按解析结果重新生成？', '确认', {
+    await ElMessageBox.confirm('丢弃对规则表的人工修改，按锚点解析出的标签重新生成？', '确认', {
       type: 'warning'
     })
   } catch {
     return
   }
   session.reseedRuleTable()
-  ElMessage.success('已恢复自动填充')
+  ElMessage.success('已按锚点自动填充')
+}
+
+/** 把盘上存档的规则表调出来（覆盖草稿，写盘仍要点「保存规则」） */
+async function restoreSaved(): Promise<void> {
+  if (session.ruleDirty) {
+    try {
+      await ElMessageBox.confirm('当前有未保存的修改，恢复存档会丢弃它们。继续？', '确认', {
+        type: 'warning'
+      })
+    } catch {
+      return
+    }
+  }
+  if (!session.restoreSavedRuleTable()) {
+    ElMessage.info('本表对还没有保存过规则表')
+    return
+  }
+  ElMessage.success('已恢复存档的规则表')
 }
 </script>
 
@@ -144,7 +162,8 @@ async function reseed(): Promise<void> {
         </span>
         <span v-if="session.ruleDirty" class="dirty">有未保存的修改</span>
         <el-button size="small" type="primary" @click="save">保存规则</el-button>
-        <el-button size="small" plain @click="reseed">恢复自动填充</el-button>
+        <el-button size="small" plain @click="reseed">以锚点自动填充</el-button>
+        <el-button size="small" plain @click="restoreSaved">恢复存档规则</el-button>
       </div>
       <div class="rule-tables">
         <RuleTable

@@ -197,6 +197,38 @@ describe('规则表草稿', () => {
     expect(s.alignConfig?.ruleTables['R06|NR06'].left['5,3']).toBe('甲_乙（改）')
   })
 
+  it('restoreSavedRuleTable 用存档覆盖草稿，且草稿与配置互不影响', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: { 'R06|NR06': { left: { '5,3': '存档值' }, right: {} } }
+    }
+    const s = useSessionStore()
+    seedPair()
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    s.ruleDrafts['R06|NR06'].left['5,3'] = '草稿改动'
+
+    expect(s.restoreSavedRuleTable()).toBe(true)
+    expect(s.activeRuleDraft?.left['5,3']).toBe('存档值')
+    expect(s.ruleDirty).toBe(false)
+    // 深拷贝：接着改草稿不能连带改到配置基准
+    s.ruleDrafts['R06|NR06'].left['5,3'] = '再改'
+    expect(s.alignConfig?.ruleTables['R06|NR06'].left['5,3']).toBe('存档值')
+  })
+
+  it('本表对没有存档时 restoreSavedRuleTable 返回 false 且不动草稿', async () => {
+    const s = useSessionStore()
+    seedPair()
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    s.ruleDrafts['R06|NR06'].left['5,3'] = '草稿'
+
+    expect(s.restoreSavedRuleTable()).toBe(false)
+    expect(s.activeRuleDraft?.left['5,3']).toBe('草稿')
+  })
+
   it('配置未就绪时拒绝保存，避免以空基准覆盖盘上规则', async () => {
     const s = useSessionStore()
     seedPair()

@@ -226,15 +226,8 @@ function onSideChange(v: string | number | boolean | undefined): void {
         :precision="4"
         size="small"
       />
-      <span class="hint">锚点词（可加多个，每份报表各取自己命中的那个）</span>
-      <el-input-tag
-        v-model="session.anchors"
-        size="small"
-        class="anchor-input"
-        placeholder="项目"
-        @change="onAnchorChange"
-      />
       <el-button
+        class="run-check"
         size="small"
         type="primary"
         :loading="session.loading"
@@ -243,6 +236,20 @@ function onSideChange(v: string | number | boolean | undefined): void {
       >
         开始核对
       </el-button>
+    </div>
+
+    <div class="panel-toolbar">
+      <span class="hint">锚点词</span>
+      <el-input-tag
+        v-model="session.anchors"
+        size="small"
+        class="anchor-input"
+        placeholder="项目"
+        @change="onAnchorChange"
+      />
+      <span class="hint anchor-hint">
+        锚点 = 报表标签区<strong>右下角</strong>那一格的文字（如「项目」「机构类别」）。可加多个，每份报表各取自己命中的那个；一个都没命中就按行列位置降级解析，到「对比规则」页人工对齐。
+      </span>
     </div>
 
     <div v-if="result" class="panel-toolbar">
@@ -424,6 +431,16 @@ function onSideChange(v: string | number | boolean | undefined): void {
 }
 .anchor-input {
   width: 260px;
+}
+/* 开始核对固定在第一行最右 */
+.run-check {
+  margin-left: auto;
+}
+/* 锚点说明：跟着输入框排，窄窗口下自然换行 */
+.anchor-hint {
+  flex: 1;
+  min-width: 240px;
+  line-height: 1.6;
 }
 .only-collapse {
   margin-top: 4px;

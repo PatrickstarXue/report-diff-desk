@@ -399,6 +399,21 @@ export const useSessionStore = defineStore('session', {
       this.ruleDirty = false
     },
 
+    /**
+     * 用盘上存档的规则表覆盖当前草稿（把已持久化的规则调出来看/接着改）。
+     * @returns 本表对没有存档时返回 false，调用方据此提示用户
+     */
+    restoreSavedRuleTable(): boolean {
+      const key = this.activeRuleKey
+      const saved = key ? this.alignConfig?.ruleTables[key] : undefined
+      if (!saved) return false
+      // 深拷贝：草稿改起来不能连带改到 alignConfig（下次保存的基准）
+      const copy = JSON.parse(JSON.stringify(saved)) as RuleTablePair
+      this.ruleDrafts = { ...this.ruleDrafts, [key]: copy }
+      this.ruleDirty = false
+      return true
+    },
+
     /** 丢弃人工修改，按种子重置当前表对的草稿 */
     reseedRuleTable(): void {
       const key = this.activeRuleKey
