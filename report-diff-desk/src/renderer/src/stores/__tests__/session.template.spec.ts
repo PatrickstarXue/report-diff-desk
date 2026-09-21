@@ -1,300 +1,190 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { useSessionStore } from '../session'
 import type {
   AlignConfig,
-  CellRange,
+  TemplateCellRef,
   TemplateCheckResult,
   TemplatePairResult,
   TemplateSheet,
   WorkbookData
 } from '@shared/types'
-import { useSessionStore } from '../session'
 
-/**
- * 还原 Electron IPC 边界：ipcRenderer.invoke 的入参在送达主进程前会被结构化克隆，
- * Vue 响应式 Proxy 过不去，会抛 DataCloneError（"An object could not be cloned."）。
- * 每个桩方法在处理入参时先 clone 一次，从而真实复现该故障。
- */
-function cloneThroughIpc<T>(arg: T): T {
-  return structuredClone(arg)
+/** 桩：IPC 边界就是结构化克隆，入参进桩先 clone——忠实模拟 Electron 的接收行为 */
+const cloneThroughIpc = structuredClone
+
+const seedCell = (): TemplateCellRef => ({
+  row: 5,
+  col: 3,
+  rowPath: '甲',
+  colPath: '乙',
+  text: '1',
+  num: 1,
+  seed: '甲_乙'
+})
+
+const seedSheet = (key: string, fileName: string, workbookId: string): TemplateSheet => ({
+  key,
+  tableNo: key.replace(/^[A-Za-z]+/, ''),
+  fileName,
+  workbookId,
+  sheetName: key,
+  degraded: false,
+  cells: [seedCell()]
+})
+
+/** 造一个表对结果；桩固定返回两对（R06/NR06 与 R31/NR31），好让「保留表对索引」可被区分 */
+const pairResult = (tableNo: string, leftKey: string, rightKey: string): TemplatePairResult => ({
+  tableNo,
+  leftFile: `${leftKey}.xls`,
+  rightFile: `${rightKey}.xls`,
+  left: seedSheet(leftKey, `${leftKey}.xls`, 'L'),
+  right: seedSheet(rightKey, `${rightKey}.xls`, 'R'),
+  diffs: [],
+  duplicateRules: [],
+  onlyInLeft: [],
+  onlyInRight: [],
+  totalCompared: 1
+})
+
+let storedConfig: AlignConfig
+let setCalls: AlignConfig[]
+let lastRequest: Record<string, unknown>
+
+function installApi(): void {
+  storedConfig = { version: 2, ruleTables: {} }
+  setCalls = []
+  lastRequest = {}
+  const result: TemplateCheckResult = {
+    pairs: [pairResult('6', 'R06', 'NR06'), pairResult('31', 'R31', 'NR31')],
+    unmatchedLeft: [],
+    unmatchedRight: [],
+    threshold: 0.0001,
+    totalDiffs: 0,
+    generatedAt: '2026-09-21T00:00:00.000Z'
+  }
+  vi.stubGlobal('window', {
+    api: {
+      getAlignConfig: () => Promise.resolve(cloneThroughIpc(storedConfig)),
+      setAlignConfig: (cfg: AlignConfig) => {
+        const plain = cloneThroughIpc(cfg)
+        setCalls.push(plain)
+        storedConfig = plain
+        return Promise.resolve()
+      },
+      checkTemplate: (req: Record<string, unknown>) => {
+        lastRequest = cloneThroughIpc(req)
+        return Promise.resolve(cloneThroughIpc(result))
+      }
+    }
+  })
 }
 
-const EMPTY_RESULT: TemplateCheckResult = {
-  pairs: [],
-  unmatchedLeft: [],
-  unmatchedRight: [],
-  threshold: 0,
-  totalDiffs: 0,
-  generatedAt: ''
-}
-
-const plainWorkbook = (id: string): WorkbookData => ({
+const wb = (id: string, fileName: string): WorkbookData => ({
   id,
-  fileName: `${id}.xlsx`,
-  source: 'zip',
+  fileName,
+  source: 'file',
   sheetNames: [],
   sheets: {}
 })
 
-/** 盘上已有的规则（getAlignConfig 返回的普通对象） */
-const STORED_CONFIG: AlignConfig = {
-  version: 1,
-  templates: { R06: { headerRange: { r1: 0, c1: 0, r2: 0, c2: 0 } } },
-  pairs: [{ left: 'R06', right: 'NR06', fromRow: 0, fromCol: 0, ignored: true }]
-}
-
-// —— 核对结果构造器（TemplateSheet 字段较多，集中一处） ——
-
-function templateSheet(key: string, error?: string): TemplateSheet {
-  return {
-    key,
-    tableNo: key.replace(/^[A-Za-z]+/, '') || null,
-    fileName: `${key}.xlsx`,
-    workbookId: key,
-    sheetName: 'Sheet1',
-    headerRange: { r1: 3, c1: 0, r2: 4, c2: 2 },
-    labelEnd: 2,
-    dataStartRow: 5,
-    dataStartCol: 3,
-    cells: [],
-    manualHeader: true,
-    ...(error ? { error } : {})
-  }
-}
-
-function pairResult(left: TemplateSheet, right: TemplateSheet): TemplatePairResult {
-  return {
-    tableNo: left.tableNo ?? right.tableNo,
-    pairLabel: `${left.fileName} ↔ ${right.fileName}`,
-    leftFile: left.fileName,
-    rightFile: right.fileName,
-    left,
-    right,
-    diffs: [],
-    onlyInLeft: [],
-    onlyInRight: [],
-    totalCompared: 1,
-    manualPairs: 0
-  }
-}
-
-function checkResult(pairs: TemplatePairResult[]): TemplateCheckResult {
-  return {
-    pairs,
-    unmatchedLeft: [],
-    unmatchedRight: [],
-    threshold: 0,
-    totalDiffs: 0,
-    generatedAt: ''
-  }
-}
-
-/** 手动指定的坏范围（把整个数据区框进去） */
-const BAD_RANGE: CellRange = { r1: 5, c1: 3, r2: 23, c2: 14 }
-/** 样例报表的正确表头区 */
-const GOOD_RANGE: CellRange = { r1: 3, c1: 0, r2: 4, c2: 2 }
-
-interface Stub {
-  checkTemplate: ReturnType<typeof vi.fn>
-  getAlignConfig: ReturnType<typeof vi.fn>
-  setAlignConfig: ReturnType<typeof vi.fn>
-}
-
-let api: Stub
-/** 盘上配置（setAlignConfig 写入、getAlignConfig/checkTemplate 读取） */
-let stored: AlignConfig
-/** 核对桩：按「盘上配置」返回结果，默认为空结果 */
-let checkImpl: (cfg: AlignConfig) => TemplateCheckResult
-
 beforeEach(() => {
   setActivePinia(createPinia())
-  stored = structuredClone(STORED_CONFIG)
-  checkImpl = () => EMPTY_RESULT
-  api = {
-    checkTemplate: vi.fn((req: unknown) => {
-      cloneThroughIpc(req)
-      return Promise.resolve(checkImpl(stored))
-    }),
-    getAlignConfig: vi.fn(() => Promise.resolve(structuredClone(stored))),
-    setAlignConfig: vi.fn((cfg: unknown) => {
-      cloneThroughIpc(cfg)
-      stored = structuredClone(cfg as AlignConfig)
-      return Promise.resolve()
-    })
+  installApi()
+})
+
+describe('runTemplateCheck', () => {
+  it('请求载荷可被结构化克隆（Pinia Proxy 不得直传）', async () => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    s.manualTablePairs = [{ leftId: 'L', rightId: 'R' }]
+    await expect(s.runTemplateCheck()).resolves.toBeUndefined()
+  })
+
+  it('规则表草稿并入请求载荷', async () => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    s.ruleDrafts = { 'R06|NR06': { left: { '5,3': '甲_乙' }, right: {} } }
+    await s.runTemplateCheck()
+    expect(lastRequest.ruleTables).toEqual({ 'R06|NR06': { left: { '5,3': '甲_乙' }, right: {} } })
+  })
+
+  it('保存触发的核对保留表对索引；主动核对回到第 1 对', async () => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck()
+    expect(s.templatePairIndex).toBe(0)
+
+    s.templatePairIndex = 1 // 切到第 2 对（R31|NR31）
+    s.ruleDrafts['R31|NR31'] = { left: {}, right: {} }
+    await s.saveRuleTable()
+    expect(s.templatePairIndex).toBe(1) // 保存不该把用户弹回第 1 对
+
+    await s.runTemplateCheck()
+    expect(s.templatePairIndex).toBe(0) // 主动核对才回到第 1 对
+  })
+})
+
+describe('规则表草稿', () => {
+  const seedPair = (): void => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
   }
-  vi.stubGlobal('window', { api })
-})
 
-describe('runTemplateCheck 的 IPC 载荷', () => {
-  it('非空 manualTablePairs 经 IPC 边界可结构化克隆', async () => {
-    const store = useSessionStore()
-    store.templateLeft = [plainWorkbook('R06')]
-    store.templateRight = [plainWorkbook('NR06')]
-    store.manualTablePairs = [{ leftId: 'R06', rightId: 'NR06' }]
-
-    await expect(store.runTemplateCheck()).resolves.toBeUndefined()
-    expect(api.checkTemplate).toHaveBeenCalledTimes(1)
-  })
-
-  it('空 manualTablePairs（首次点「开始核对」）经 IPC 边界可结构化克隆', async () => {
-    const store = useSessionStore()
-    store.templateLeft = [plainWorkbook('R06')]
-    store.templateRight = [plainWorkbook('NR06')]
-
-    await expect(store.runTemplateCheck()).resolves.toBeUndefined()
-    expect(api.checkTemplate).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('saveAlignConfig 的 IPC 载荷', () => {
-  it('响应式 state 派生出的配置经 IPC 边界可结构化克隆，且以纯对象写入', async () => {
-    const store = useSessionStore()
-    store.alignConfig = await window.api.getAlignConfig()
-
-    // 模拟 TemplatePanel.saveRules / clearTableRules：以 store（reactive）为基准合并出配置
-    const cfg: AlignConfig = {
-      version: 1,
-      templates: store.alignConfig!.templates,
-      pairs: [...store.alignConfig!.pairs]
+  it('initRuleDraft 用种子补齐缺席位置，已保存的值优先', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: { 'R06|NR06': { left: { '5,3': '人工值' }, right: {} } }
     }
-
-    await expect(store.saveAlignConfig(cfg)).resolves.toBeUndefined()
-
-    expect(api.setAlignConfig).toHaveBeenCalledTimes(1)
-    const received = api.setAlignConfig.mock.calls[0][0] as AlignConfig
-    expect(() => cloneThroughIpc(received)).not.toThrow()
-    expect(received).toEqual(STORED_CONFIG)
-  })
-})
-
-describe('runTemplateCheck 的表对索引', () => {
-  const twoPairs = (): TemplateCheckResult =>
-    checkResult([
-      pairResult(templateSheet('R06'), templateSheet('NR06')),
-      pairResult(templateSheet('R31'), templateSheet('NR31'))
-    ])
-
-  function readyStore(): ReturnType<typeof useSessionStore> {
-    const store = useSessionStore()
-    store.templateLeft = [plainWorkbook('R06'), plainWorkbook('R31')]
-    store.templateRight = [plainWorkbook('NR06'), plainWorkbook('NR31')]
-    return store
-  }
-
-  it('保存规则触发的重新核对保留当前表对索引', async () => {
-    const store = readyStore()
-    checkImpl = twoPairs
-    await store.runTemplateCheck()
-    store.templatePairIndex = 1
-
-    await store.saveAlignConfig({ version: 1, templates: {}, pairs: [] })
-
-    expect(store.templatePairIndex).toBe(1)
+    const s = useSessionStore()
+    seedPair()
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    const d = s.activeRuleDraft
+    expect(d?.left['5,3']).toBe('人工值')
+    expect(d?.right['5,3']).toBe('甲_乙')
   })
 
-  it('重新核对后表对变少时索引被夹到合法范围', async () => {
-    const store = readyStore()
-    checkImpl = twoPairs
-    await store.runTemplateCheck()
-    store.templatePairIndex = 1
-
-    checkImpl = () => checkResult([pairResult(templateSheet('R06'), templateSheet('NR06'))])
-    await store.saveAlignConfig({ version: 1, templates: {}, pairs: [] })
-
-    expect(store.templatePairIndex).toBe(0)
+  it('reseedRuleTable 丢弃人工修改', async () => {
+    const s = useSessionStore()
+    seedPair()
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    s.ruleDrafts['R06|NR06'].left['5,3'] = '改过的'
+    s.reseedRuleTable()
+    expect(s.activeRuleDraft?.left['5,3']).toBe('甲_乙')
+    expect(s.ruleDirty).toBe(false)
   })
 
-  it('重新核对后表对为空时索引归 0', async () => {
-    const store = readyStore()
-    checkImpl = twoPairs
-    await store.runTemplateCheck()
-    store.templatePairIndex = 1
-
-    checkImpl = () => checkResult([])
-    await store.saveAlignConfig({ version: 1, templates: {}, pairs: [] })
-
-    expect(store.templatePairIndex).toBe(0)
+  it('saveRuleTable 深拷贝后写盘并清除脏标记', async () => {
+    const s = useSessionStore()
+    seedPair()
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    s.ruleDrafts['R06|NR06'].left['5,3'] = '甲_乙（改）'
+    s.ruleDirty = true
+    await s.saveRuleTable()
+    expect(setCalls).toHaveLength(1)
+    expect(setCalls[0].ruleTables['R06|NR06'].left['5,3']).toBe('甲_乙（改）')
+    expect(s.ruleDirty).toBe(false)
+    expect(s.alignConfig?.ruleTables['R06|NR06'].left['5,3']).toBe('甲_乙（改）')
   })
 
-  it('用户主动「开始核对」时回到第 1 对', async () => {
-    const store = readyStore()
-    checkImpl = twoPairs
-    await store.runTemplateCheck()
-    store.templatePairIndex = 1
-
-    await store.runTemplateCheck()
-
-    expect(store.templatePairIndex).toBe(0)
-  })
-})
-
-describe('setTemplateHeaderRange 的范围校验与回滚', () => {
-  /** 候选范围被写盘时返回该侧 error，模拟「坏范围把表弄坏」 */
-  function badRangeImpl(cfg: AlignConfig): TemplateCheckResult {
-    const r = cfg.templates.R06?.headerRange
-    const bad = !!r && r.r1 === BAD_RANGE.r1 && r.c1 === BAD_RANGE.c1
-    return checkResult([
-      pairResult(
-        templateSheet('R06', bad ? '表头区未识别到数据列，请手动指定表样范围' : undefined),
-        templateSheet('NR06')
-      )
-    ])
-  }
-
-  async function readyStore(): Promise<ReturnType<typeof useSessionStore>> {
-    const store = useSessionStore()
-    store.templateLeft = [plainWorkbook('R06')]
-    store.templateRight = [plainWorkbook('NR06')]
-    store.templateSide = 'left'
-    await store.reloadAlignConfig()
-    await store.runTemplateCheck()
-    return store
-  }
-
-  it('坏范围导致该侧解析失败时回滚到改动前的范围', async () => {
-    checkImpl = badRangeImpl
-    const store = await readyStore()
-
-    const ok = await store.setTemplateHeaderRange(BAD_RANGE)
-
-    expect(ok).toBe(false)
-    expect(api.setAlignConfig).toHaveBeenCalledTimes(2)
-    // 第二次写盘是回滚：等于改动前的配置
-    expect(api.setAlignConfig.mock.calls[1][0]).toEqual(STORED_CONFIG)
-    expect(store.alignConfig!.templates.R06?.headerRange).toEqual({ r1: 0, c1: 0, r2: 0, c2: 0 })
-  })
-
-  it('改动前不存在该表样条目时，回滚是删除条目而非写空对象', async () => {
-    stored = { version: 1, templates: {}, pairs: [] }
-    checkImpl = badRangeImpl
-    const store = await readyStore()
-
-    const ok = await store.setTemplateHeaderRange(BAD_RANGE)
-
-    expect(ok).toBe(false)
-    expect(api.setAlignConfig).toHaveBeenCalledTimes(2)
-    expect(Object.prototype.hasOwnProperty.call(store.alignConfig!.templates, 'R06')).toBe(false)
-  })
-
-  it('好范围被接受：写盘一次、配置更新、返回 true', async () => {
-    checkImpl = () => checkResult([pairResult(templateSheet('R06'), templateSheet('NR06'))])
-    const store = await readyStore()
-
-    const ok = await store.setTemplateHeaderRange(GOOD_RANGE)
-
-    expect(ok).toBe(true)
-    expect(api.setAlignConfig).toHaveBeenCalledTimes(1)
-    expect(store.alignConfig!.templates.R06?.headerRange).toEqual(GOOD_RANGE)
-  })
-
-  it('写盘载荷经 IPC 边界可结构化克隆', async () => {
-    checkImpl = badRangeImpl
-    const store = await readyStore()
-
-    await store.setTemplateHeaderRange(BAD_RANGE)
-
-    for (const call of api.setAlignConfig.mock.calls) {
-      expect(() => cloneThroughIpc(call[0])).not.toThrow()
-    }
+  it('配置未就绪时拒绝保存，避免以空基准覆盖盘上规则', async () => {
+    const s = useSessionStore()
+    seedPair()
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    s.alignConfig = null
+    await expect(s.saveRuleTable()).rejects.toThrow('配置未就绪')
+    expect(setCalls).toHaveLength(0)
   })
 })

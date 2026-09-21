@@ -2,11 +2,13 @@ import { defineStore } from 'pinia'
 import type {
   AlignConfig,
   BatchCompareResult,
-  CellRange,
   DocContent,
   FilePairResult,
+  RuleTable,
+  RuleTablePair,
   TemplateCheckResult,
   TemplatePairResult,
+  TemplateSheet,
   TemplateTablePair,
   WorkbookData
 } from '@shared/types'
@@ -55,8 +57,10 @@ interface SessionState {
   /** 人工指定的表对（表号冲突时用），仅本次生效 */
   manualTablePairs: TemplateTablePair[]
   alignConfig: AlignConfig | null
-  /** 最近一次表样范围保存失败（已回滚）时的解析错误原文 */
-  templateRangeError: string
+  /** 规则表草稿，键 `左表样键|右表样键`；与已保存配置合并后参与核对（草稿优先） */
+  ruleDrafts: Record<string, RuleTablePair>
+  /** 草稿有未保存修改 */
+  ruleDirty: boolean
 }
 
 export const useSessionStore = defineStore('session', {
@@ -88,7 +92,8 @@ export const useSessionStore = defineStore('session', {
     templateFocus: null,
     manualTablePairs: [],
     alignConfig: null,
-    templateRangeError: ''
+    ruleDrafts: {},
+    ruleDirty: false
   }),
 
   getters: {
@@ -118,6 +123,16 @@ export const useSessionStore = defineStore('session', {
         )
       }
       return set
+    },
+    /** 当前表对的配置键 `左表样键|右表样键`；无表对时为空串 */
+    activeRuleKey: (s): string => {
+      const p = s.templateResult?.pairs[s.templatePairIndex]
+      if (!p) return ''
+      return `${templateKeyOf(p.leftFile)}|${templateKeyOf(p.rightFile)}`
+    },
+    /** 当前表对的规则表草稿；尚未初始化时为 null */
+    activeRuleDraft(): RuleTablePair | null {
+      return this.ruleDrafts[this.activeRuleKey] ?? null
     }
   },
 
@@ -301,10 +316,16 @@ export const useSessionStore = defineStore('session', {
       if (!this.templateLeft.length || !this.templateRight.length) return
       this.loading = true
       try {
+        // 规则表草稿优先于已保存配置：编辑后立即点核对就能看到效果
+        const merged: Record<string, RuleTablePair> = {
+          ...(this.alignConfig?.ruleTables ?? {}),
+          ...this.ruleDrafts
+        }
         const req = {
           leftIds: this.templateLeft.map((w) => w.id),
           rightIds: this.templateRight.map((w) => w.id),
-          manualPairs: this.manualTablePairs,
+          manualTablePairs: this.manualTablePairs,
+          ruleTables: merged,
           threshold: this.templateThreshold
         }
         // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
@@ -317,61 +338,61 @@ export const useSessionStore = defineStore('session', {
       }
     },
 
-    /** 读取人工规则；失败时如实抛出（alignConfig 保持 null），由调用方提示用户，避免空基准覆盖盘上规则 */
+    /** 读取规则表配置；失败时如实抛出（alignConfig 保持 null），由调用方提示用户，避免空基准覆盖盘上规则 */
     async reloadAlignConfig(): Promise<void> {
       this.alignConfig = await window.api.getAlignConfig()
     },
 
-    /** 写入人工规则并重新核对（保留当前表对，避免保存后跳回第 1 对） */
-    async saveAlignConfig(cfg: AlignConfig): Promise<void> {
-      // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
-      const plain: AlignConfig = JSON.parse(JSON.stringify(cfg))
-      await window.api.setAlignConfig(plain)
-      this.alignConfig = plain
-      await this.runTemplateCheck({ keepPairIndex: true })
-    },
-
-    /** 当前侧解析错误：候选范围写盘后，按表样键在核对结果中找该侧并取 error */
-    _templateSideError(key: string): string {
-      const p = this.templateResult?.pairs.find((x) =>
-        this.templateSide === 'left' ? x.left?.key === key : x.right?.key === key
-      )
-      if (!p) return `核对结果中未找到表样 ${key} 所属的表对`
-      return (this.templateSide === 'left' ? p.left?.error : p.right?.error) ?? ''
-    },
-
-    /**
-     * 人工指定表头区。写盘并重新核对后，若该侧解析失败则回滚到改动前的范围。
-     * 改动前若不存在该表样条目，回滚 = 删除条目（回到「项 目」锚点自动识别）。
-     * @returns true 已接受；false 已回滚（失败原因见 templateRangeError）
-     */
-    async setTemplateHeaderRange(headerRange: CellRange): Promise<boolean> {
-      const base = this.alignConfig
-      if (!base) throw new Error('人工规则配置未就绪')
-      const key = templateKeyOf(this.activeTemplateWorkbook?.fileName ?? '')
-      if (!key) throw new Error('未找到当前侧的报表文件')
-      const prevTemplates = { ...base.templates }
-      const prevRange = base.templates[key]?.headerRange
-      const basePairs = base.pairs
-
-      await this.saveAlignConfig({
-        version: 1,
-        templates: { ...prevTemplates, [key]: { headerRange } },
-        pairs: basePairs
-      })
-
-      const error = this._templateSideError(key)
-      if (!error) {
-        this.templateRangeError = ''
-        return true
+    /** 初始化当前表对的规则表草稿：已保存的值优先，缺席的位置用种子补齐 */
+    initRuleDraft(): void {
+      const p = this.templateResult?.pairs[this.templatePairIndex]
+      const key = this.activeRuleKey
+      if (!p || !key || this.ruleDrafts[key]) return
+      const saved = this.alignConfig?.ruleTables[key]
+      const build = (t: TemplateSheet | null, side: 'left' | 'right'): RuleTable => {
+        const out: RuleTable = { ...(saved?.[side] ?? {}) }
+        for (const c of t?.cells ?? []) {
+          const pos = `${c.row},${c.col}`
+          if (out[pos] === undefined) out[pos] = c.seed
+        }
+        return out
       }
+      this.ruleDrafts = {
+        ...this.ruleDrafts,
+        [key]: { left: build(p.left, 'left'), right: build(p.right, 'right') }
+      }
+      this.ruleDirty = false
+    },
 
-      const templates = { ...prevTemplates }
-      if (prevRange) templates[key] = { headerRange: prevRange }
-      else delete templates[key]
-      await this.saveAlignConfig({ version: 1, templates, pairs: basePairs })
-      this.templateRangeError = error
-      return false
+    /** 丢弃人工修改，按种子重置当前表对的草稿 */
+    reseedRuleTable(): void {
+      const key = this.activeRuleKey
+      if (!key) return
+      const rest = { ...this.ruleDrafts }
+      delete rest[key]
+      this.ruleDrafts = rest
+      this.ruleDirty = false
+      this.initRuleDraft()
+    },
+
+    /** 保存当前表对的规则表并重新核对（保留当前表对，避免保存后跳回第 1 对） */
+    async saveRuleTable(): Promise<void> {
+      const key = this.activeRuleKey
+      const draft = this.ruleDrafts[key]
+      if (!draft) return
+      const base = this.alignConfig
+      if (!base) throw new Error('配置未就绪，已放弃保存以避免覆盖已有规则')
+      const cfg: AlignConfig = {
+        version: 2,
+        // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
+        ruleTables: JSON.parse(
+          JSON.stringify({ ...base.ruleTables, [key]: draft })
+        ) as Record<string, RuleTablePair>
+      }
+      await window.api.setAlignConfig(cfg)
+      this.alignConfig = cfg
+      this.ruleDirty = false
+      await this.runTemplateCheck({ keepPairIndex: true })
     },
 
     /** 差异列表行点击 → 切到对应侧并跳转 */

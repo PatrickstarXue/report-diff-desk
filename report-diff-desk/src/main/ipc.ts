@@ -6,7 +6,8 @@ import { matchWorkbookPairs } from '@shared/core/pairing'
 import {
   checkTemplates,
   pairTemplateWorkbooks,
-  parseWorkbook
+  parseWorkbook,
+  templateKeyOf
 } from '@shared/core/template'
 import type {
   AlignConfig,
@@ -230,19 +231,19 @@ export function registerIpc(): void {
       }
       if (left.length === 0 || right.length === 0) throw new Error('请先选择两套报表')
 
-      const cfg = await loadAlignConfig()
       const threshold = typeof req.threshold === 'number' ? req.threshold : 0.0001
       const pairing = pairTemplateWorkbooks(
         left as WorkbookData[],
         right as WorkbookData[],
-        req.manualPairs ?? []
+        req.manualTablePairs ?? []
       )
-      const pairs = pairing.pairs.map((p) =>
-        checkTemplates(parseWorkbook(p.left, cfg), parseWorkbook(p.right, cfg), {
+      const pairs = pairing.pairs.map((p) => {
+        const key = `${templateKeyOf(p.left.fileName)}|${templateKeyOf(p.right.fileName)}`
+        return checkTemplates(parseWorkbook(p.left), parseWorkbook(p.right), {
           threshold,
-          config: cfg
+          ruleTable: req.ruleTables?.[key]
         })
-      )
+      })
       pairs.sort((a, b) => (a.tableNo ?? '').localeCompare(b.tableNo ?? '', undefined, { numeric: true }))
 
       return {

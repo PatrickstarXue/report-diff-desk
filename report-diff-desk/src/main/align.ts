@@ -3,16 +3,17 @@ import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { AlignConfig } from '@shared/types'
 
-/** 表样人工规则配置（按表样键索引），落盘到 userData */
+/** 规则表配置（按 `左表样键|右表样键` 索引），落盘到 userData */
 function alignPath(): string {
   return join(app.getPath('userData'), 'template-align.json')
 }
 
 /**
- * 读取人工规则。
+ * 读取规则表配置。
  * - 文件不存在（ENOENT）→ 返回空配置（首次运行，正常）
  * - 其余读取错误 / JSON 解析失败 → 抛错，绝不静默退化为空配置：
- *   调用方若拿空配置做基准合并保存，会把盘上已有规则整体覆盖。
+ *   调用方若拿空配置做基准保存，会把盘上已有规则整体覆盖。
+ * - version 不是 2 → 按空配置（v1 的坐标规则与规则值语义没有对应关系，不做迁移）
  */
 export async function loadAlignConfig(): Promise<AlignConfig> {
   let text: string
@@ -20,17 +21,17 @@ export async function loadAlignConfig(): Promise<AlignConfig> {
     text = await readFile(alignPath(), 'utf-8')
   } catch (err) {
     if ((err as { code?: string } | null)?.code === 'ENOENT') {
-      return { version: 1, templates: {}, pairs: [] }
+      return { version: 2, ruleTables: {} }
     }
     throw new Error(`人工规则配置读取失败：${err instanceof Error ? err.message : String(err)}`)
   }
   try {
     const raw = JSON.parse(text)
-    return {
-      version: 1,
-      templates: raw?.templates && typeof raw.templates === 'object' ? raw.templates : {},
-      pairs: Array.isArray(raw?.pairs) ? raw.pairs : []
+    const tables = raw?.ruleTables
+    if (raw?.version !== 2 || typeof tables !== 'object' || tables === null) {
+      return { version: 2, ruleTables: {} }
     }
+    return { version: 2, ruleTables: tables }
   } catch {
     throw new Error('人工规则配置解析失败：文件内容不是合法 JSON')
   }
