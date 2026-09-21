@@ -196,6 +196,9 @@ describe('锚点词', () => {
     expect(s.effectiveAnchors).toEqual(['项目'])
     s.anchors = []
     expect(s.effectiveAnchors).toEqual(['项目'])
+    // el-input-tag 的「清空」emit 的是 undefined
+    s.anchors = undefined as unknown as string[]
+    expect(s.effectiveAnchors).toEqual(['项目'])
   })
 
   it('列表里的多个词随核对请求一起发出（各报表自取命中项）', async () => {

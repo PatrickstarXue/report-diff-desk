@@ -143,7 +143,8 @@ export const useSessionStore = defineStore('session', {
 
     /** 生效的锚点词：按顺序尝试，每个报表取自己命中的那个；全为空时用默认「项目」 */
     effectiveAnchors(): string[] {
-      const list = this.anchors.map((s) => s.trim()).filter(Boolean)
+      // el-input-tag 的「清空」会把值 emit 成 undefined，这里一并兜住
+      const list = (this.anchors ?? []).map((s) => s.trim()).filter(Boolean)
       return list.length > 0 ? list : [...DEFAULT_ANCHORS]
     }
   },
