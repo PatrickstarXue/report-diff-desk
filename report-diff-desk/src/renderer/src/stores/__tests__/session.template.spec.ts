@@ -50,19 +50,22 @@ const pairResult = (tableNo: string, leftKey: string, rightKey: string): Templat
 let storedConfig: AlignConfig
 let setCalls: AlignConfig[]
 let lastRequest: Record<string, unknown>
+/** 桩每次核对返回的表对；个别用例会换成别的组合 */
+let stubPairs: TemplatePairResult[]
 
 function installApi(): void {
   storedConfig = { version: 2, ruleTables: {} }
   setCalls = []
   lastRequest = {}
-  const result: TemplateCheckResult = {
-    pairs: [pairResult('6', 'R06', 'NR06'), pairResult('31', 'R31', 'NR31')],
+  stubPairs = [pairResult('6', 'R06', 'NR06'), pairResult('31', 'R31', 'NR31')]
+  const result = (): TemplateCheckResult => ({
+    pairs: stubPairs,
     unmatchedLeft: [],
     unmatchedRight: [],
     threshold: 0.0001,
     totalDiffs: 0,
     generatedAt: '2026-09-21T00:00:00.000Z'
-  }
+  })
   vi.stubGlobal('window', {
     api: {
       getAlignConfig: () => Promise.resolve(cloneThroughIpc(storedConfig)),
@@ -74,7 +77,7 @@ function installApi(): void {
       },
       checkTemplate: (req: Record<string, unknown>) => {
         lastRequest = cloneThroughIpc(req)
-        return Promise.resolve(cloneThroughIpc(result))
+        return Promise.resolve(cloneThroughIpc(result()))
       }
     }
   })
@@ -111,7 +114,7 @@ describe('runTemplateCheck', () => {
     expect(lastRequest.ruleTables).toEqual({ 'R06|NR06': { left: { '5,3': '甲_乙' }, right: {} } })
   })
 
-  it('保存触发的核对保留表对索引；主动核对回到第 1 对', async () => {
+  it('核对后停在原来那张表对上，不弹回第 1 对', async () => {
     const s = useSessionStore()
     s.templateLeft = [wb('L', 'R06.xls')]
     s.templateRight = [wb('R', 'NR06.xls')]
@@ -120,12 +123,28 @@ describe('runTemplateCheck', () => {
     expect(s.templatePairIndex).toBe(0)
 
     s.templatePairIndex = 1 // 切到第 2 对（R31|NR31）
+    await s.runTemplateCheck() // 主动核对（改阈值/锚点词后的路径）
+    expect(s.templatePairIndex).toBe(1)
+
     s.ruleDrafts['R31|NR31'] = { left: {}, right: {} }
     await s.saveRuleTable()
-    expect(s.templatePairIndex).toBe(1) // 保存不该把用户弹回第 1 对
+    expect(s.templatePairIndex).toBe(1)
+  })
 
+  it('表对顺序变了跟着标识走；整组换了则按下标夹回合法范围', async () => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
     await s.runTemplateCheck()
-    expect(s.templatePairIndex).toBe(0) // 主动核对才回到第 1 对
+    s.templatePairIndex = 1 // R31|NR31
+
+    stubPairs = [pairResult('31', 'R31', 'NR31'), pairResult('6', 'R06', 'NR06')]
+    await s.runTemplateCheck()
+    expect(s.templatePairIndex).toBe(0) // 跟着标识走，而不是死守下标 1
+
+    stubPairs = [pairResult('6', 'R06', 'NR06')]
+    await s.runTemplateCheck()
+    expect(s.templatePairIndex).toBe(0) // 原表对不在了 → 夹回合法范围
   })
 })
 

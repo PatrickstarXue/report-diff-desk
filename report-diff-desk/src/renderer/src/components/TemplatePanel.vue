@@ -180,8 +180,7 @@ async function openSide(side: 'left' | 'right'): Promise<void> {
   try {
     await session.loadTemplateSide(side, res.path)
     ElMessage.success(`已加载：${templateKeyOf(res.path)}`)
-    // 保留当前表对：重新上传后仍停在你正在维护的那一张，不会跳回第 1 对
-    await session.runTemplateCheck({ keepPairIndex: true })
+    await session.runTemplateCheck()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }

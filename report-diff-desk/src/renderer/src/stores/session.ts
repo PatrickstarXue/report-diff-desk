@@ -321,12 +321,14 @@ export const useSessionStore = defineStore('session', {
     },
 
     /**
-     * 重新核对。
-     * @param opts.keepPairIndex 保留当前表对索引（保存规则触发时用）；否则回到第 1 对。
-     *   保留时若表对数量变化，索引被夹回合法范围（0 个表对时为 0）。
+     * 重新核对（改阈值/锚点词/保存规则后都会走这里）。
+     * 核对完停在原来那张表对上：改个设置就被弹回第 1 对，等于白切一次。
      */
-    async runTemplateCheck(opts: { keepPairIndex?: boolean } = {}): Promise<void> {
+    async runTemplateCheck(): Promise<void> {
       if (!this.templateLeft.length || !this.templateRight.length) return
+      // 核对前记住当前停在哪个表对（按标识而不是下标，表对顺序变了也不会跳）
+      const prevKey = this.activeRuleKey
+      const prevIndex = this.templatePairIndex
       this.loading = true
       try {
         // 规则表草稿优先于已保存配置：编辑后立即点核对就能看到效果
@@ -344,8 +346,12 @@ export const useSessionStore = defineStore('session', {
         }
         // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
         this.templateResult = await window.api.checkTemplate(JSON.parse(JSON.stringify(req)))
-        const last = Math.max(0, (this.templateResult?.pairs.length ?? 0) - 1)
-        this.templatePairIndex = opts.keepPairIndex ? Math.min(this.templatePairIndex, last) : 0
+        const pairs = this.templateResult?.pairs ?? []
+        const same = pairs.findIndex(
+          (p) => `${templateKeyOf(p.leftFile)}|${templateKeyOf(p.rightFile)}` === prevKey
+        )
+        // 表对还在原处就停回原处；换了报表文件（标识找不到）则按下标夹回合法范围
+        this.templatePairIndex = same >= 0 ? same : Math.min(prevIndex, Math.max(0, pairs.length - 1))
         this.templateFocus = null
       } finally {
         this.loading = false
@@ -422,7 +428,7 @@ export const useSessionStore = defineStore('session', {
       await window.api.setAlignConfig(cfg)
       this.alignConfig = cfg
       this.ruleDirty = false
-      await this.runTemplateCheck({ keepPairIndex: true })
+      await this.runTemplateCheck()
     },
 
     /** 差异列表行点击 → 切到对应侧并跳转 */
