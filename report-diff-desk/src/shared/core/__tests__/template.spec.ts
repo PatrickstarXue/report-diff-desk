@@ -136,6 +136,7 @@ describe('parseTemplateSheet', () => {
     expect(t.cells[0].rowPath).toBe('贴现/银承/3个月')
     expect(t.cells[0].colPath).toBe('发生额')
     expect(t.cells[0].seed).toBe('贴现/银承/3个月_发生额')
+    expect(t.anchor).toEqual({ row: 3, col: 0 })
   })
 
   it('行路径由标签列各段拼接，合并格向下填充', () => {
@@ -162,6 +163,7 @@ describe('parseTemplateSheet', () => {
     )
     expect(t.error).toBeUndefined()
     expect(t.degraded).toBe(true)
+    expect(t.anchor).toBeUndefined()
     expect(t.cells).toHaveLength(1)
     expect(t.cells[0].rowPath).toBe('第2行')
     expect(t.cells[0].colPath).toBe('B')

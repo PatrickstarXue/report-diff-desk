@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { TemplateDiff } from '@shared/types'
+import type { TemplateDiff, TemplateSheet } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
+import { colLetter } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import TemplateGrid from './TemplateGrid.vue'
 import RulePanel from './RulePanel.vue'
@@ -101,6 +102,18 @@ const degradedHint = computed(() =>
     ? `该表对有一侧没能识别到锚点「${session.anchorList.join('、')}」——若这份报表的标签区左上角用的是别的词（如「期限」），把它填到上方「锚点词」再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
     : ''
 )
+
+/** 两侧锚点命中的位置（Excel 记法，如 C4）；降级侧标注未识别到 */
+const anchorPos = computed(() => {
+  const p = pair.value
+  if (!p) return ''
+  if (!p.left?.anchor && !p.right?.anchor) return ''
+  const at = (t: TemplateSheet | null | undefined, name: string): string => {
+    const a = t?.anchor
+    return a ? `${name} ${colLetter(a.col)}${a.row + 1}` : `${name} 未识别到`
+  }
+  return `当前锚点命中：${at(p.left, '左侧')}，${at(p.right, '右侧')}`
+})
 
 /** 锚点词改动落盘（失焦 / 回车触发）；配置没读进来时 saveAnchors 静默跳过 */
 async function onAnchorChange(): Promise<void> {
@@ -301,6 +314,20 @@ function onSideChange(v: string | number | boolean | undefined): void {
           :title="degradedHint"
         />
 
+        <el-alert
+          v-if="dupRows.length"
+          type="warning"
+          show-icon
+          :closable="false"
+          :title="`规则值重复 ${dupRows.length} 项，可能是锚点没落在最后一个标签列`"
+        >
+          <template #default>
+            同一个规则值在一侧出现多次时，该值整体不参与比对。若某个标签维度被挤掉了（比如同一期限下几家机构算成了同一个值），
+            说明锚点左边的标签列取少了——引擎把锚点右边那一列当成了数据列。请把上方「锚点词」改成该报表标签区<b>右下角</b>那一格的文字，再点「开始核对」。
+            <div v-if="anchorPos" class="anchor-pos">{{ anchorPos }}</div>
+          </template>
+        </el-alert>
+
         <el-table
           v-if="result"
           :data="diffRows"
@@ -406,5 +433,10 @@ function onSideChange(v: string | number | boolean | undefined): void {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   padding: 4px 0;
+}
+.anchor-pos {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
 }
 </style>

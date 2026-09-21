@@ -223,7 +223,7 @@ export function parseTemplateSheet(input: {
     if (rowCells.length > 0) cells.push(...rowCells)
   }
 
-  return { ...base, cells, degraded: false }
+  return { ...base, cells, degraded: false, anchor: { row: a.r, col: a.c } }
 }
 
 /** 取工作簿第一个 sheet 解析（本项目报表均为单 sheet） */

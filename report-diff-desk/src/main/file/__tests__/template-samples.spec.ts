@@ -116,3 +116,46 @@ describe.skipIf(!hasSamples)('表样核对 · 真实样例端到端', () => {
     expect(res.diffs.some((d) => d.leftText === '1.2')).toBe(false)
   })
 })
+
+const FILES21 = ['R21.xls', 'NR21.xls']
+const hasSamples21 = FILES21.every((f) => existsSync(resolve(DIR, f)))
+
+/** R21/NR21 的表头行是「期限(c0-c1) | 机构类别(c2) | 金额(c3)…」，锚点必须落在最后一个标签列 c2 */
+describe.skipIf(!hasSamples21)('表样核对 · 锚点落在最后一个标签列（R21/NR21）', () => {
+  const load21 = (name: string): TemplateSheet =>
+    parseWorkbook(parseExcel(readFileSync(resolve(DIR, name)), name, 'file'), ['机构类别'])
+
+  it('锚点命中「机构类别」，规则值即「左侧标签路径_上侧列标签」', () => {
+    const t = load21('R21.xls')
+    expect(t.degraded).toBe(false)
+    expect(t.anchor).toEqual({ row: 3, col: 2 })
+    const c = cellAt(t, 4, 3)
+    expect(c?.rowPath).toBe('活期/其他存款性公司')
+    expect(c?.colPath).toBe('金额')
+    expect(c?.seed).toBe('活期/其他存款性公司_金额')
+  })
+
+  it('两侧规则值一一配上：88 项比对、无重复值、无未配上', () => {
+    const res = checkTemplates(load21('R21.xls'), load21('NR21.xls'), { threshold: T })
+    expect(res.left?.error).toBeUndefined()
+    expect(res.right?.error).toBeUndefined()
+    expect(res.totalCompared).toBe(88)
+    expect(res.duplicateRules).toEqual([])
+    expect(res.onlyInLeft).toEqual([])
+    expect(res.onlyInRight).toEqual([])
+  })
+
+  it('锚点选在非最后一个标签列（期限）时标签维度被挤掉：值退化成「活期_金额」并大量重复', () => {
+    const l = parseWorkbook(parseExcel(readFileSync(resolve(DIR, 'R21.xls')), 'R21.xls', 'file'), ['期限'])
+    expect(l.anchor).toEqual({ row: 3, col: 0 })
+    expect(l.cells.some((c) => c.seed === '活期_金额')).toBe(true)
+    const res = checkTemplates(
+      l,
+      parseWorkbook(parseExcel(readFileSync(resolve(DIR, 'NR21.xls')), 'NR21.xls', 'file'), ['期限']),
+      { threshold: T }
+    )
+    // 该信号驱动界面提示「锚点没落在最后一个标签列」
+    expect(res.duplicateRules.length).toBeGreaterThan(0)
+    expect(res.totalCompared).toBeLessThan(10)
+  })
+})
