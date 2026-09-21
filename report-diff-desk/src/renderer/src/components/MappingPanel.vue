@@ -14,11 +14,7 @@ const session = useSessionStore()
  * 外层 div 横向不可能溢出（el-table 是 width:100% + overflow:hidden），
  * 拿它当滚动容器会让横向彻底滚不动，横向滚动条也会被顶到整张表的最底部。
  */
-const gridRef = ref<{
-  $el: HTMLElement
-  scrollTo: (o: { top: number }) => void
-  doLayout: () => void
-} | null>(null)
+const gridRef = ref<{ $el: HTMLElement; doLayout: () => void } | null>(null)
 
 // —— 左键拖拽平移（Ctrl+左键保留原生文本选择） ——
 const { dragging, onMouseDown: startPan } = useDragPan(
@@ -47,10 +43,15 @@ function onOverviewResize(deltaY: number): void {
 /** 本次选中是否由页内点击产生：是的话格子本就在眼前，不该再动滚动条 */
 let pickedLocally = false
 
-/** 行高从 DOM 实测：写死 28px 会让跳转落点偏上（小尺寸表格换行后远大于 28） */
-function measuredRowHeight(): number {
-  const row = gridRef.value?.$el.querySelector<HTMLElement>('.el-table__body tbody tr')
-  return row?.offsetHeight || 28
+/**
+ * 跳转定位：直接让选中格滚进视野。
+ * 不用 el-table 的 scrollTo / 自己算行偏移——切标签页时表格刚从隐藏变可见，
+ * 滚动容器的高度还没重新量过，按坐标算出来的落点不可靠。
+ */
+function revealSelectedCell(): void {
+  gridRef.value?.$el
+    .querySelector<HTMLElement>('td.doc-cell-selected')
+    ?.scrollIntoView({ block: 'center', inline: 'nearest' })
 }
 
 // 从网格高亮页跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
@@ -63,7 +64,9 @@ watch(
       return
     }
     setTimeout(() => {
-      gridRef.value?.scrollTo({ top: Math.max(0, (sel.row - 3) * measuredRowHeight()) })
+      // 切标签页时表格刚从隐藏变可见，表体高度可能还没重新量过，先强制重排
+      gridRef.value?.doLayout()
+      revealSelectedCell()
     }, 100)
   }
 )
