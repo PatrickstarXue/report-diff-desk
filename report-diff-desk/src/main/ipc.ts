@@ -232,6 +232,7 @@ export function registerIpc(): void {
       if (left.length === 0 || right.length === 0) throw new Error('请先选择两套报表')
 
       const threshold = typeof req.threshold === 'number' ? req.threshold : 0.0001
+      const anchors = Array.isArray(req.anchors) ? req.anchors : undefined
       const pairing = pairTemplateWorkbooks(
         left as WorkbookData[],
         right as WorkbookData[],
@@ -239,7 +240,7 @@ export function registerIpc(): void {
       )
       const pairs = pairing.pairs.map((p) => {
         const key = `${templateKeyOf(p.left.fileName)}|${templateKeyOf(p.right.fileName)}`
-        return checkTemplates(parseWorkbook(p.left), parseWorkbook(p.right), {
+        return checkTemplates(parseWorkbook(p.left, anchors), parseWorkbook(p.right, anchors), {
           threshold,
           ruleTable: req.ruleTables?.[key]
         })

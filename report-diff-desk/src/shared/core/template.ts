@@ -72,11 +72,30 @@ function ruleValueOf(rowPath: string, colPath: string): string {
   return `${rowPath}_${colPath}`
 }
 
-/** 锚点：归一化文本等于「项 目」的格，左上优先 */
-function findAnchor(m: string[][]): { r: number; c: number } | null {
-  for (let r = 0; r < m.length; r++) {
-    for (let c = 0; c < m[r].length; c++) {
-      if (/^项\s*目$/.test(m[r][c])) return { r, c }
+/** 默认锚点词：报表标签区左上角那一格的文本 */
+export const DEFAULT_ANCHORS = ['项目']
+
+/** 比较用：去掉全部空白，避免「项 目」这类排版空格导致漏匹配 */
+function bareLabel(s: string): string {
+  return s.replace(/\s+/g, '')
+}
+
+/** 候选词清洗：去空白项；一个都不剩时回落到默认锚点 */
+function resolveAnchors(anchors?: string[]): string[] {
+  const list = (Array.isArray(anchors) ? anchors : [])
+    .map((s) => normLabel(s))
+    .filter((s) => bareLabel(s) !== '')
+  return list.length > 0 ? list : DEFAULT_ANCHORS
+}
+
+/** 锚点：归一化文本命中候选词的格；按候选词顺序尝试，每个词左上优先 */
+function findAnchor(m: string[][], anchors: string[]): { r: number; c: number } | null {
+  for (const word of anchors) {
+    const want = bareLabel(word)
+    for (let r = 0; r < m.length; r++) {
+      for (let c = 0; c < m[r].length; c++) {
+        if (bareLabel(m[r][c]) === want) return { r, c }
+      }
     }
   }
   return null
@@ -128,14 +147,17 @@ function degradedSheet(
 
 /**
  * 解析单张表：定位表头区与标签列，提取「有值行」及其全部数据格，并为每格生成种子规则值。
- * 表头区由「项 目」锚点格的合并范围决定；找不到锚点时降级为全表位置解析，不再报错中止。
+ * 表头区由锚点格（文本命中锚点词，默认「项目」）的合并范围决定；
+ * 找不到锚点时降级为全表位置解析，不再报错中止。
  */
 export function parseTemplateSheet(input: {
   sheet: SheetData
   fileName: string
   workbookId: string
+  /** 锚点词候选，按序尝试；缺席或全是空串时用默认「项目」 */
+  anchors?: string[]
 }): TemplateSheet {
-  const { sheet, fileName, workbookId } = input
+  const { sheet, fileName, workbookId, anchors } = input
   const base = {
     key: templateKeyOf(fileName),
     tableNo: tableNoOf(fileName),
@@ -149,7 +171,7 @@ export function parseTemplateSheet(input: {
   }
 
   const m = mergedLabelMatrix(sheet)
-  const a = findAnchor(m)
+  const a = findAnchor(m, resolveAnchors(anchors))
   if (!a) return degradedSheet(base, sheet)
 
   const mg = (sheet.merges ?? []).find((x) => x.r1 === a.r && x.c1 === a.c)
@@ -205,7 +227,7 @@ export function parseTemplateSheet(input: {
 }
 
 /** 取工作簿第一个 sheet 解析（本项目报表均为单 sheet） */
-export function parseWorkbook(wb: WorkbookData): TemplateSheet {
+export function parseWorkbook(wb: WorkbookData, anchors?: string[]): TemplateSheet {
   const name = wb.sheetNames[0]
   const sheet = name ? wb.sheets[name] : undefined
   const base = {
@@ -216,7 +238,7 @@ export function parseWorkbook(wb: WorkbookData): TemplateSheet {
     sheetName: ''
   }
   if (!sheet) return { ...base, cells: [], degraded: true, error: '工作簿中没有工作表' }
-  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id })
+  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id, anchors })
 }
 
 /** 表对配对结果 */

@@ -31,7 +31,13 @@ export async function loadAlignConfig(): Promise<AlignConfig> {
     if (raw?.version !== 2 || typeof tables !== 'object' || tables === null) {
       return { version: 2, ruleTables: {} }
     }
-    return { version: 2, ruleTables: tables }
+    // anchors 是 v2 内新增的可选字段，旧文件没有就继续用默认锚点
+    const anchors: string[] = Array.isArray(raw.anchors)
+      ? raw.anchors.filter((s: unknown): s is string => typeof s === 'string' && s.trim() !== '')
+      : []
+    return anchors.length > 0
+      ? { version: 2, ruleTables: tables, anchors }
+      : { version: 2, ruleTables: tables }
   } catch {
     throw new Error('人工规则配置解析失败：文件内容不是合法 JSON')
   }

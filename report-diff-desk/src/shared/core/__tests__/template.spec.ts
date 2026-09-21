@@ -168,6 +168,77 @@ describe('parseTemplateSheet', () => {
     expect(t.cells[0].seed).toBe('第2行_B')
   })
 
+  it('锚点词可自定义：换成「期限」照样识别表头区', () => {
+    const s = sheetOf(
+      12,
+      8,
+      [
+        [3, 0, '期 限'],
+        [3, 3, '发生额'],
+        [5, 0, '贴现'],
+        [5, 3, 1.1]
+      ],
+      [
+        { r1: 3, c1: 0, r2: 4, c2: 2 },
+        { r1: 3, c1: 3, r2: 4, c2: 3 }
+      ]
+    )
+    const t = parseTemplateSheet({
+      sheet: s,
+      fileName: 'R06.xls',
+      workbookId: 'w1',
+      anchors: ['期限']
+    })
+    expect(t.error).toBeUndefined()
+    expect(t.degraded).toBe(false)
+    expect(t.cells).toHaveLength(1)
+    expect(t.cells[0].seed).toBe('贴现_发生额')
+    // 同一张表用默认锚点找不到 → 降级
+    expect(parse(s).degraded).toBe(true)
+  })
+
+  it('多个候选词按填写顺序取第一个命中的', () => {
+    // 「项目」在 A3（表头区只占一行），「期限」在 A4（表头区 A4:C5）
+    const s = sheetOf(
+      9,
+      8,
+      [
+        [2, 0, '项目'],
+        [2, 4, '发生额'],
+        [3, 0, '期限'],
+        [3, 3, '发生额'],
+        [5, 0, '乙'],
+        [5, 3, 2]
+      ],
+      [
+        { r1: 2, c1: 0, r2: 2, c2: 1 },
+        { r1: 3, c1: 0, r2: 4, c2: 2 },
+        { r1: 3, c1: 3, r2: 4, c2: 3 }
+      ]
+    )
+    const anchor = (anchors: string[]): TemplateSheet =>
+      parseTemplateSheet({ sheet: s, fileName: 'R06.xls', workbookId: 'w1', anchors })
+    // 命中「项目」：表头区到 A3:B3，数据从第 4 行起
+    const byProject = anchor(['项目', '期限'])
+    expect(byProject.cells.every((c) => c.row >= 3)).toBe(true)
+    expect(byProject.cells.some((c) => c.row === 3)).toBe(true)
+    // 命中「期限」：表头区 A4:C5，数据从第 6 行起
+    const byLimit = anchor(['期限', '项目'])
+    expect(byLimit.cells.every((c) => c.row >= 5)).toBe(true)
+    expect(byLimit.cells.some((c) => c.row === 5)).toBe(true)
+  })
+
+  it('候选词全是空串时回落到默认「项目」', () => {
+    const t = parseTemplateSheet({
+      sheet: anchoredSheet([]),
+      fileName: 'R06.xls',
+      workbookId: 'w1',
+      anchors: ['', '   ']
+    })
+    expect(t.degraded).toBe(false)
+    expect(t.cells).toHaveLength(1)
+  })
+
   it('表头区找不到数据列时同样降级', () => {
     // 锚点在 A4，但数据列范围内没有任何列标签
     const s = sheetOf(8, 4, [[3, 0, '项    目'], [5, 2, 9]], [{ r1: 3, c1: 0, r2: 4, c2: 2 }])

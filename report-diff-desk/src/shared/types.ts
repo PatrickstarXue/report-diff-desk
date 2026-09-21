@@ -270,6 +270,8 @@ export interface AlignConfig {
   version: 2
   /** 键：`左表样键|右表样键` */
   ruleTables: Record<string, RuleTablePair>
+  /** 锚点词候选，按序尝试；缺席时用默认「项目」 */
+  anchors?: string[]
 }
 
 /** 手动指定的表对关系（表号提不出或冲突时用），仅本次生效 */
@@ -285,5 +287,7 @@ export interface TemplateCheckRequest {
   manualTablePairs?: TemplateTablePair[]
   /** 已保存的规则表，按 `左键|右键` 索引；缺席的表对全部用种子 */
   ruleTables?: Record<string, RuleTablePair>
+  /** 锚点词候选，按序尝试；缺席时用默认「项目」 */
+  anchors?: string[]
   threshold: number
 }

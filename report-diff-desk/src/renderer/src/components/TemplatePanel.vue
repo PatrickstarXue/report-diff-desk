@@ -98,9 +98,18 @@ const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.e
 /** 锚点未识别、已按行列位置降级解析：种子是「第N行_列字母」，需人工在规则表里对齐 */
 const degradedHint = computed(() =>
   pair.value?.left?.degraded || pair.value?.right?.degraded
-    ? '该表对有一侧没能识别到「项 目」锚点，已按行列位置降级解析——规则值形如「第6行_D」，请在「对比规则」页人工对齐。'
+    ? `该表对有一侧没能识别到锚点「${session.anchorList.join('、')}」——若这份报表的标签区左上角用的是别的词（如「期限」），把它填到上方「锚点词」再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
     : ''
 )
+
+/** 锚点词改动落盘（失焦 / 回车触发）；配置没读进来时 saveAnchors 静默跳过 */
+async function onAnchorChange(): Promise<void> {
+  try {
+    await session.saveAnchors()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
 
 /** 该表对一格都没配上，需要到规则表里把两侧规则值改一致 */
 const noAutoPairHint = computed(() => {
@@ -204,6 +213,14 @@ function onSideChange(v: string | number | boolean | undefined): void {
         :step="0.01"
         :precision="4"
         size="small"
+      />
+      <span class="hint">锚点词（标签区左上角的文字，多个用「、」分隔）</span>
+      <el-input
+        v-model="session.anchorText"
+        size="small"
+        class="anchor-input"
+        placeholder="项目"
+        @change="onAnchorChange"
       />
       <el-button
         size="small"
@@ -378,6 +395,9 @@ function onSideChange(v: string | number | boolean | undefined): void {
 }
 .mini-select {
   width: 200px;
+}
+.anchor-input {
+  width: 140px;
 }
 .only-collapse {
   margin-top: 4px;
