@@ -6,7 +6,9 @@ import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import { useDragPan } from '../utils/dragPan'
+import { useGridZoom } from '../utils/zoom'
 import ResizeBar from './ResizeBar.vue'
+import ZoomBadge from './ZoomBadge.vue'
 
 const session = useSessionStore()
 
@@ -20,6 +22,14 @@ const gridRef = ref<{
 } | null>(null)
 const tableHeight = ref(400)
 let resizeStartH = 400
+
+// Ctrl+滚轮缩放：档位变化后 el-table 要重新量一次表体高度，否则滚动区还是旧的
+const {
+  pct: zoomPct,
+  zoom: zoomScale,
+  onWheel: onZoomWheel,
+  reset: resetZoom
+} = useGridZoom({ onChange: () => nextTick(() => gridRef.value?.doLayout()) })
 
 const pairOptions = computed(() =>
   (session.compareResult?.pairs ?? []).map((p, i) => ({ index: i, label: p.pairLabel }))
@@ -200,7 +210,7 @@ watch(
 </script>
 
 <template>
-  <div class="sheet-grid">
+  <div class="sheet-grid" @wheel="onZoomWheel">
     <div class="grid-toolbar">
       <span v-if="pairOptions.length" class="grid-hint">文件对：</span>
       <el-select
@@ -220,7 +230,7 @@ watch(
       <el-select v-model="sheetName" size="small" class="sheet-select" placeholder="选择工作表">
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 由比对结果点击跳转对应单元格（1对1）；右键单元格查看口径/复制数值；左键拖拽平移</span>
+      <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 由比对结果点击跳转对应单元格（1对1）；右键单元格查看口径/复制数值；左键拖拽平移；Ctrl+滚轮缩放</span>
     </div>
     <el-table
       v-if="sheetData"
@@ -228,7 +238,8 @@ watch(
       :data="sheetData.cells.map((row, i) => ({ _rowIndex: i, cells: row }))"
       size="small"
       border
-      :height="tableHeight"
+      :height="Math.round(tableHeight / zoomScale)"
+      :style="{ zoom: zoomScale }"
       :cell-class-name="cellClass"
       :span-method="spanMethod"
       @mousedown="onGridMouseDown"
@@ -256,6 +267,7 @@ watch(
     <ResizeBar v-if="sheetData" @start="onTableResizeStart" @drag="onTableResize" />
     <el-empty v-else-if="!session.compareResult" description="请上传报表后比对" />
     <el-empty v-else description="请上传报表后比对" />
+    <ZoomBadge :pct="zoomPct" @reset="resetZoom" />
     <!-- 右键菜单 -->
     <div
       v-if="ctxMenu"
@@ -270,6 +282,7 @@ watch(
 
 <style scoped>
 .sheet-grid {
+  position: relative; /* 缩放档位角标定位基准 */
   display: flex;
   flex-direction: column;
   height: 100%;

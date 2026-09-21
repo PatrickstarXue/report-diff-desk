@@ -6,7 +6,9 @@ import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import { useDragPan } from '../utils/dragPan'
+import { useGridZoom } from '../utils/zoom'
 import ResizeBar from './ResizeBar.vue'
+import ZoomBadge from './ZoomBadge.vue'
 
 const session = useSessionStore()
 /**
@@ -28,6 +30,14 @@ function onGridMouseDown(e: MouseEvent): void {
   if (!(e.target as HTMLElement | null)?.closest('.el-table__body-wrapper')) return
   startPan(e)
 }
+
+// Ctrl+滚轮缩放。表高按档位折算，表格外框尺寸不变，只有内容放大
+const {
+  pct: zoomPct,
+  zoom: zoomScale,
+  onWheel: onZoomWheel,
+  reset: resetZoom
+} = useGridZoom({ onChange: () => nextTick(() => gridRef.value?.doLayout()) })
 
 const overviewHeight = ref(Math.floor(window.innerHeight * 0.5))
 let resizeStartH = Math.floor(window.innerHeight * 0.5)
@@ -249,11 +259,16 @@ async function removeCurrentDoc(): Promise<void> {
     </div>
 
     <div v-if="activeSheet" class="doc-browser">
-      <div class="doc-overview" :style="{ height: overviewHeight + 'px' }">
+      <div
+        class="doc-overview"
+        :style="{ height: overviewHeight + 'px' }"
+        @wheel="onZoomWheel"
+      >
         <el-table
           ref="gridRef"
           :data="gridRows"
-          :height="overviewHeight"
+          :height="Math.round(overviewHeight / zoomScale)"
+          :style="{ zoom: zoomScale }"
           size="small"
           border
           :cell-class-name="cellClass"
@@ -280,6 +295,7 @@ async function removeCurrentDoc(): Promise<void> {
             <template #default="{ row }">{{ cellBrief(row.cells[c - 1]) }}</template>
           </el-table-column>
         </el-table>
+        <ZoomBadge :pct="zoomPct" @reset="resetZoom" />
       </div>
 
       <ResizeBar @start="onOverviewResizeStart" @drag="onOverviewResize" />
@@ -351,6 +367,7 @@ async function removeCurrentDoc(): Promise<void> {
   min-height: 0;
 }
 .doc-overview {
+  position: relative; /* 缩放档位角标定位基准 */
   overflow: hidden; /* 滚动交给表体内部的 el-scrollbar */
   border: 1px solid var(--el-border-color);
   border-radius: 4px;

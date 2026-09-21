@@ -20,7 +20,7 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 
 - **`src/shared/`**：纯逻辑，零 Node/Electron 依赖，vitest 直接测试（node 环境）。核心在 `core/`（engine.ts 环比比对引擎、numeric.ts 数值解析、mapping.ts 口径映射、pairing.ts 顺序配对、merge.ts 合并单元格 span 矩阵、summary.ts 概览汇总、template.ts 新旧表数据比对（规则表配对）、sheet-view.ts 网格渲染纯函数）
 - **`src/main/`**：main 进程。`file/`（excel.ts/zip.ts/docx.ts/pdf.ts/txt.ts/loader.ts 分格式解析）、`export/`（excel.ts zip 导出、html.ts 明细导出）、`ipc.ts`（全部 ipcMain.handle + 入参校验）、`store.ts`（工作簿会话缓存）、`align.ts`（规则表持久化）
-- **`src/renderer/src/`**：renderer 进程。`stores/session.ts`（Pinia 全局状态：比对/网格焦点/文档库/规则表草稿）、`components/`（FilePanel/SheetGrid/DiffList/MappingPanel/DocViewer/PdfViewer/OverviewPanel/ResizeBar/TemplatePanel/TemplateGrid/RulePanel/RuleTable）、`App.vue`（布局 + 版本信息；标签页：报表环比 / 环比结果概览 / 口径查询 / 口径文档 / 新旧表数据比对）
+- **`src/renderer/src/`**：renderer 进程。`stores/session.ts`（Pinia 全局状态：比对/网格焦点/文档库/规则表草稿）、`components/`（FilePanel/SheetGrid/DiffList/MappingPanel/DocViewer/PdfViewer/OverviewPanel/ResizeBar/TemplatePanel/TemplateGrid/RulePanel/RuleTable/ZoomBadge）、`utils/`（dragPan 左键拖拽平移、zoom Ctrl+滚轮缩放）、`App.vue`（布局 + 版本信息；标签页：报表环比 / 环比结果概览 / 口径查询 / 口径文档 / 新旧表数据比对）
 - **`src/shared/ipc.ts`**：IPC channel 名常量，main/preload/renderer 三端共用
 - **`src/shared/api.ts`**：window.api 契约接口，preload 逐 channel 包装 ipcRenderer.invoke
 
@@ -39,7 +39,7 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 
 ## 测试
 
-vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export + renderer store），共 121 个用例（119 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）；`src/main/file/__tests__/template-samples.spec.ts` 用 samples/similarSample/ 的真实 xls 走生产解析链路，样例缺失时整组跳过。
+vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export + renderer store/utils），共 146 个用例（144 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）；`src/main/file/__tests__/template-samples.spec.ts` 用 samples/similarSample/ 的真实 xls 走生产解析链路，样例缺失时整组跳过。
 
 `src/renderer/src/stores/__tests__/session.template.spec.ts` 用 `structuredClone` 桩模拟 IPC 边界——渲染进程传给 `window.api` 的载荷必须是纯对象（Pinia 响应式 Proxy 会抛 `DataCloneError: An object could not be cloned.`），新增 IPC 调用时照 `session.ts` 里 `JSON.parse(JSON.stringify(...))` 的既有写法深拷贝。
 

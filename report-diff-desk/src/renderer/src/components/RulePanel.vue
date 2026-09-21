@@ -2,9 +2,14 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSessionStore } from '../stores/session'
+import { useGridZoom } from '../utils/zoom'
 import RuleTable from './RuleTable.vue'
+import ZoomBadge from './ZoomBadge.vue'
 
 const session = useSessionStore()
+
+// Ctrl+滚轮缩放：左右两张规则表一起缩，免得两边字号不一样
+const { pct: zoomPct, zoom: zoomScale, onWheel: onZoomWheel, reset: resetZoom } = useGridZoom()
 
 const pair = computed(() => session.activeTemplatePair)
 const draft = computed(() => session.activeRuleDraft)
@@ -127,7 +132,8 @@ async function restoreSaved(): Promise<void> {
 </script>
 
 <template>
-  <div class="rule-panel">
+  <div class="rule-panel" @wheel="onZoomWheel">
+    <ZoomBadge :pct="zoomPct" @reset="resetZoom" />
     <!-- 已核对：可编辑规则表 -->
     <template v-if="editable">
       <div class="rule-toolbar">
@@ -140,7 +146,7 @@ async function restoreSaved(): Promise<void> {
         <el-button size="small" plain @click="reseed">以锚点自动填充</el-button>
         <el-button size="small" plain @click="restoreSaved">恢复存档规则</el-button>
       </div>
-      <div class="rule-tables">
+      <div class="rule-tables" :style="{ zoom: zoomScale }">
         <RuleTable
           title="左侧（R 系列）"
           :cells="pair?.left?.cells ?? []"
@@ -168,7 +174,7 @@ async function restoreSaved(): Promise<void> {
           <el-option v-for="k in savedKeys" :key="k" :label="k" :value="k" />
         </el-select>
       </div>
-      <div v-if="preview" class="rule-tables">
+      <div v-if="preview" class="rule-tables" :style="{ zoom: zoomScale }">
         <RuleTable
           :title="`左侧（${previewKey.split('|')[0]}）`"
           :cells="[]"
@@ -195,6 +201,7 @@ async function restoreSaved(): Promise<void> {
 
 <style scoped>
 .rule-panel {
+  position: relative; /* 缩放档位角标定位基准 */
   display: flex;
   flex-direction: column;
   gap: 8px;

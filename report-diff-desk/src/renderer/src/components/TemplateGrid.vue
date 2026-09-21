@@ -1,17 +1,28 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useSessionStore } from '../stores/session'
 import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useDragPan } from '../utils/dragPan'
+import { useGridZoom } from '../utils/zoom'
+import ZoomBadge from './ZoomBadge.vue'
 
 const session = useSessionStore()
 
 const gridRef = ref<{
   $el: HTMLElement
   scrollTo: (o: { top: number }) => void
+  doLayout: () => void
 } | null>(null)
 const tableHeight = 420
+
+// Ctrl+滚轮缩放；el-table 高度按档位折算，脚下这块地盘大小保持不变
+const {
+  pct: zoomPct,
+  zoom: zoomScale,
+  onWheel: onZoomWheel,
+  reset: resetZoom
+} = useGridZoom({ onChange: () => nextTick(() => gridRef.value?.doLayout()) })
 
 /** 当前侧的工作表（本项目报表均为单 sheet，取第一个） */
 const sheetData = computed(() => {
@@ -75,14 +86,15 @@ watch(
 </script>
 
 <template>
-  <div class="template-grid">
+  <div class="template-grid" @wheel="onZoomWheel">
     <el-table
       v-if="sheetData"
       ref="gridRef"
       :data="rows"
       size="small"
       border
-      :height="tableHeight"
+      :height="Math.round(tableHeight / zoomScale)"
+      :style="{ zoom: zoomScale }"
       :cell-class-name="cellClass"
       :span-method="spanMethod"
       @mousedown="onGridMouseDown"
@@ -106,6 +118,7 @@ watch(
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
+    <ZoomBadge :pct="zoomPct" @reset="resetZoom" />
   </div>
 </template>
 
