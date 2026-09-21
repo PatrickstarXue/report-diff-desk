@@ -120,16 +120,28 @@ async function save(): Promise<void> {
   }
 }
 
+/**
+ * 以锚点自动填充：先用**当前填写的锚点词**重新解析两侧报表，再按新解析出的标签重建规则表。
+ * 不重新解析的话，刚改的锚点词（还没点「开始核对」）根本不会生效。
+ */
 async function reseed(): Promise<void> {
+  const words = session.effectiveAnchors.join('、')
   try {
-    await ElMessageBox.confirm('丢弃对规则表的人工修改，按锚点解析出的标签重新生成？', '确认', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `将按当前锚点词「${words}」重新解析两侧报表，并按解析出的标签重新生成规则表（丢弃人工修改与存档值）。继续？`,
+      '确认',
+      { type: 'warning' }
+    )
   } catch {
     return
   }
-  session.reseedRuleTable()
-  ElMessage.success('已按锚点自动填充')
+  try {
+    await session.runTemplateCheck()
+    session.reseedRuleTable()
+    ElMessage.success('已按当前锚点词重新解析并填充')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 /** 把盘上存档的规则表调出来（覆盖草稿，写盘仍要点「保存规则」） */

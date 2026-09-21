@@ -414,15 +414,22 @@ export const useSessionStore = defineStore('session', {
       return true
     },
 
-    /** 丢弃人工修改，按种子重置当前表对的草稿 */
+    /**
+     * 丢弃人工修改与盘上存档，按**当前解析结果**的种子重建当前表对的草稿。
+     * 只用种子（不吃 alignConfig 里的存档）：想吃存档是「恢复存档规则」那件事，
+     * 两个按钮要互不重叠，否则「重新自动填充」填出来的还是旧规则。
+     */
     reseedRuleTable(): void {
       const key = this.activeRuleKey
-      if (!key) return
-      const rest = { ...this.ruleDrafts }
-      delete rest[key]
-      this.ruleDrafts = rest
+      const p = this.templateResult?.pairs[this.templatePairIndex]
+      if (!key || !p) return
+      const build = (t: TemplateSheet | null): RuleTable => {
+        const out: RuleTable = {}
+        for (const c of t?.cells ?? []) out[`${c.row},${c.col}`] = c.seed
+        return out
+      }
+      this.ruleDrafts = { ...this.ruleDrafts, [key]: { left: build(p.left), right: build(p.right) } }
       this.ruleDirty = false
-      this.initRuleDraft()
     },
 
     /** 保存当前表对的规则表并重新核对（保留当前表对，避免保存后跳回第 1 对） */

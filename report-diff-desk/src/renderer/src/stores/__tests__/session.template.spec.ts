@@ -170,15 +170,21 @@ describe('规则表草稿', () => {
     expect(d?.right['5,3']).toBe('甲_乙')
   })
 
-  it('reseedRuleTable 丢弃人工修改', async () => {
+  it('reseedRuleTable 只用种子重建：人工修改与存档值都丢掉', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: { 'R06|NR06': { left: { '5,3': '存档值' }, right: {} } }
+    }
     const s = useSessionStore()
     seedPair()
     s.alignConfig = await window.api.getAlignConfig()
     await s.runTemplateCheck()
     s.initRuleDraft()
+    expect(s.activeRuleDraft?.left['5,3']).toBe('存档值') // 初次进入草稿吃存档
+
     s.ruleDrafts['R06|NR06'].left['5,3'] = '改过的'
     s.reseedRuleTable()
-    expect(s.activeRuleDraft?.left['5,3']).toBe('甲_乙')
+    expect(s.activeRuleDraft?.left['5,3']).toBe('甲_乙') // 重新填充只吃种子
     expect(s.ruleDirty).toBe(false)
   })
 
