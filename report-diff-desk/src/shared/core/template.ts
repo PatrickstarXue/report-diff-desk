@@ -80,12 +80,18 @@ function bareLabel(s: string): string {
   return s.replace(/\s+/g, '')
 }
 
-/** 候选词清洗：去空白项；一个都不剩时回落到默认锚点 */
+/**
+ * 候选词清洗：去空白项，并总是把默认锚点挂在最后当备选。
+ * 默认值不该因为用户加了自己的词就失效——否则一份只写了「机构类别」的列表，
+ * 会让本来认「项目」的报表白白降级成位置型规则值。
+ */
 function resolveAnchors(anchors?: string[]): string[] {
   const list = (Array.isArray(anchors) ? anchors : [])
     .map((s) => normLabel(s))
     .filter((s) => bareLabel(s) !== '')
-  return list.length > 0 ? list : DEFAULT_ANCHORS
+  const seen = new Set(list.map(bareLabel))
+  const extra = DEFAULT_ANCHORS.filter((d) => !seen.has(d))
+  return [...list, ...extra]
 }
 
 /** 锚点：归一化文本命中候选词的格；按候选词顺序尝试，每个词左上优先 */

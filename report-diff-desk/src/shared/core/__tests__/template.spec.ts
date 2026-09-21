@@ -230,6 +230,18 @@ describe('parseTemplateSheet', () => {
     expect(byLimit.cells.some((c) => c.row === 5)).toBe(true)
   })
 
+  it('默认锚点始终作为最后的备选：只写了别的词也不会让认「项目」的表降级', () => {
+    const t = parseTemplateSheet({
+      sheet: anchoredSheet([[5, 3, 1]]),
+      fileName: 'R06.xls',
+      workbookId: 'w1',
+      anchors: ['机构类别']
+    })
+    expect(t.degraded).toBe(false)
+    expect(t.anchor).toEqual({ row: 3, col: 0, word: '项目' })
+    expect(t.cells[0].seed).toBe('贴现/银承/3个月_发生额')
+  })
+
   it('候选词全是空串时回落到默认「项目」', () => {
     const t = parseTemplateSheet({
       sheet: anchoredSheet([]),
