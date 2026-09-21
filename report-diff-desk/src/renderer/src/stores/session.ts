@@ -417,7 +417,7 @@ export const useSessionStore = defineStore('session', {
     /**
      * 丢弃人工修改与盘上存档，按**当前解析结果**的种子重建当前表对的草稿。
      * 只用种子（不吃 alignConfig 里的存档）：想吃存档是「恢复存档规则」那件事，
-     * 两个按钮要互不重叠，否则「重新自动填充」填出来的还是旧规则。
+     * 两个按钮要互不重叠，否则「以锚点自动填充」填出来的还是旧规则。
      */
     reseedRuleTable(): void {
       const key = this.activeRuleKey

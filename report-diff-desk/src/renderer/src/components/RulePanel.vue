@@ -49,50 +49,13 @@ function valuesOf(side: 'left' | 'right'): Set<string> {
 const peerOfLeft = computed(() => valuesOf('right'))
 const peerOfRight = computed(() => valuesOf('left'))
 
-/** 本轮核对里已经问过「恢复还是重新填充」的表对键；新一轮核对会清空以重新询问 */
-const asked = ref<Set<string>>(new Set())
-watch(
-  () => session.templateResult,
-  () => {
-    asked.value = new Set()
-  }
-)
-
 /**
- * 初始化当前表对的规则表草稿。
- * 该表对已有保存的规则时先问一次：恢复已有规则，还是按报表重新自动填充。
+ * 初始化当前表对的规则表草稿：该表对有存档就直接用（缺席的位置用种子补齐）。
+ * 不弹框问「恢复还是重新填充」——想按锚点重来，上方有「以锚点自动填充」按钮。
  */
-async function ensureDraft(): Promise<void> {
+function ensureDraft(): void {
   const key = session.activeRuleKey
   if (!key || session.ruleDrafts[key]) return
-  const saved = session.alignConfig?.ruleTables?.[key]
-  const savedCount = saved ? Object.keys(saved.left).length + Object.keys(saved.right).length : 0
-
-  if (savedCount > 0 && !asked.value.has(key)) {
-    asked.value.add(key)
-    try {
-      await ElMessageBox.confirm(
-        `表对「${key}」已有保存的规则表（共 ${savedCount} 格）。要恢复它，还是按报表重新自动填充？`,
-        '已有规则表',
-        {
-          confirmButtonText: '恢复已有规则',
-          cancelButtonText: '重新自动填充',
-          type: 'warning',
-          distinguishCancelAndClose: true
-        }
-      )
-      session.initRuleDraft()
-    } catch (action) {
-      if (action === 'cancel') {
-        session.reseedRuleTable()
-        ElMessage.info('已按报表重新自动填充；点「保存规则」后才会覆盖盘上的旧规则')
-      } else {
-        // 关闭对话框：什么都不破坏，按恢复已有规则处理
-        session.initRuleDraft()
-      }
-    }
-    return
-  }
   session.initRuleDraft()
 }
 
@@ -100,7 +63,7 @@ async function ensureDraft(): Promise<void> {
 // 组件挂载时往往还没核对过，只靠 onMounted 会永远停在空态
 watch(
   () => [session.activeRuleKey, session.templateResult, session.alignConfig] as const,
-  () => void ensureDraft(),
+  () => ensureDraft(),
   { immediate: true }
 )
 
