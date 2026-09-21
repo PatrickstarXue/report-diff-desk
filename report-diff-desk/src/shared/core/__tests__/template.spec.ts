@@ -5,6 +5,8 @@ import {
   pairTemplateWorkbooks,
   parseTemplateSheet,
   parseWorkbook,
+  ruleValueOf,
+  splitRuleValue,
   tableNoOf,
   templateKeyOf
 } from '../template'
@@ -312,6 +314,32 @@ describe('parseTemplateSheet', () => {
 })
 
 // ——— 规则值与生效值 ———
+
+describe('规则值拆半（界面「只改行 / 只改列」批量用）', () => {
+  it('ruleValueOf 拼装：行标签_列标签', () => {
+    expect(ruleValueOf('活期/其他存款性公司', '金额')).toBe('活期/其他存款性公司_金额')
+  })
+
+  it('splitRuleValue 按第一个下划线切两半', () => {
+    expect(splitRuleValue('活期/其他存款性公司_金额')).toEqual({
+      row: '活期/其他存款性公司',
+      col: '金额'
+    })
+    expect(splitRuleValue('活期_(-∞,-30)')).toEqual({ row: '活期', col: '(-∞,-30)' })
+  })
+
+  it('没有下划线时整串算行部分；两半都可能为空', () => {
+    expect(splitRuleValue('活期')).toEqual({ row: '活期', col: '' })
+    expect(splitRuleValue('_金额')).toEqual({ row: '', col: '金额' })
+    expect(splitRuleValue('')).toEqual({ row: '', col: '' })
+  })
+
+  it('拼装与拆半互逆', () => {
+    const v = ruleValueOf('定期/1-3个月(含)/其他存款性公司', '加权平均利率')
+    const p = splitRuleValue(v)
+    expect(ruleValueOf(p.row, p.col)).toBe(v)
+  })
+})
 
 describe('effectiveRule', () => {
   const cell = tsheet('R06', [[5, 3, '甲', '乙', 1]]).cells[0]

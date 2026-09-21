@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { colLetter } from '@shared/core/sheet-view'
+import { ruleValueOf, splitRuleValue } from '@shared/core/template'
 import type { TemplateCellRef } from '@shared/types'
 
 const props = defineProps<{
@@ -118,26 +119,44 @@ function commitEdit(): void {
   emit('update:modelValue', next)
 }
 
-/** 整行 / 整列批量设置：把该范围内的规则值一次改成同一个 */
+/**
+ * 整行 / 整列批量设置。
+ * 规则值形如 `行规则值_列规则值`，行头只改行那一半、列头只改列那一半，另一半原样保留
+ * （某格缺另一半时用该格自己的行/列标签补上）。
+ * 已清空的格子（空串 = 不比对）保持不动，批量操作不该把排除掉的格子又拉回比对。
+ */
 async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
   if (props.readonly) return
-  const hint = kind === 'row' ? rowLabel(index) : colLabel(index)
+  const isRow = kind === 'row'
+  const half = isRow ? '行规则值' : '列规则值'
+  const other = isRow ? '列规则值' : '行规则值'
+  const hint = isRow ? rowLabel(index) : colLabel(index)
   let v: string
   try {
     const r = await ElMessageBox.prompt(
-      `${kind === 'row' ? '整行' : '整列'}「${hint}」的规则值统一设为：`,
+      `整${isRow ? '行' : '列'}「${hint}」的${half}统一设为（${other}保持不变，已清空的格子不动）：`,
       '批量设置',
-      { inputValue: hint, inputPlaceholder: '规则值' }
+      { inputValue: hint, inputPlaceholder: half }
     )
     v = r.value ?? ''
   } catch {
     return
   }
   const next = { ...props.modelValue }
-  if (kind === 'row') {
-    for (const col of colList.value) if (exists(index, col)) put(next, index, col, v)
+  const apply = (row: number, col: number): void => {
+    if (!exists(row, col)) return
+    const old = valueAt(row, col)
+    if (!old.trim()) return
+    const parts = splitRuleValue(old)
+    const merged = isRow
+      ? ruleValueOf(v, parts.col || colLabel(col))
+      : ruleValueOf(parts.row || rowLabel(row), v)
+    put(next, row, col, merged)
+  }
+  if (isRow) {
+    for (const col of colList.value) apply(index, col)
   } else {
-    for (const row of rowList.value) if (exists(row, index)) put(next, row, index, v)
+    for (const row of rowList.value) apply(row, index)
   }
   emit('update:modelValue', next)
 }
@@ -153,7 +172,13 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
             <th class="corner"></th>
             <th v-for="col in colList" :key="col" class="col-head">
               <span class="head-text">{{ colLabel(col) }}</span>
-              <el-button v-if="!readonly" link size="small" @click="bulkSet('col', col)">
+              <el-button
+                v-if="!readonly"
+                link
+                size="small"
+                title="把本列各格的列规则值统一改成一个"
+                @click="bulkSet('col', col)"
+              >
                 批量
               </el-button>
             </th>
@@ -163,7 +188,13 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
           <tr v-for="r in rows" :key="r.row">
             <th class="row-head">
               <span class="head-text">{{ r.label }}</span>
-              <el-button v-if="!readonly" link size="small" @click="bulkSet('row', r.row)">
+              <el-button
+                v-if="!readonly"
+                link
+                size="small"
+                title="把本行各格的行规则值统一改成一个"
+                @click="bulkSet('row', r.row)"
+              >
                 批量
               </el-button>
             </th>

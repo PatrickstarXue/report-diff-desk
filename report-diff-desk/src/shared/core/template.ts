@@ -67,9 +67,18 @@ function joinPath(parts: string[]): string {
   return out.join('/')
 }
 
-/** 种子规则值：行标签 + 列标签 */
-function ruleValueOf(rowPath: string, colPath: string): string {
+/** 种子规则值：`行标签_列标签`。规则值的格式只有这一处定义，拼装/拆半都用它 */
+export function ruleValueOf(rowPath: string, colPath: string): string {
   return `${rowPath}_${colPath}`
+}
+
+/**
+ * 规则值拆半：第一个下划线前是行部分、之后是列部分（用于界面「只改行/只改列」的批量设置）。
+ * 没有下划线时整串都算行部分；两半都可能为空串。
+ */
+export function splitRuleValue(v: string): { row: string; col: string } {
+  const i = v.indexOf('_')
+  return i < 0 ? { row: v, col: '' } : { row: v.slice(0, i), col: v.slice(i + 1) }
 }
 
 /** 默认锚点词：报表标签区左上角那一格的文本 */

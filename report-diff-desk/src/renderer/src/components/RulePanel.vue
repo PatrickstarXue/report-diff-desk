@@ -139,7 +139,8 @@ async function reseed(): Promise<void> {
     <template v-if="editable">
       <div class="rule-toolbar">
         <span class="hint">
-          两侧规则值<strong>相同</strong>才参与比对；清空某格 = 该格不比对。改动即时生效，点「保存规则」持久化。
+          两侧规则值<strong>相同</strong>才参与比对；清空某格 = 该格不比对。规则值形如
+          <strong>行规则值_列规则值</strong>，行首/列首的「批量」只改各自那一半。改动即时生效，点「保存规则」持久化。
         </span>
         <span v-if="session.ruleDirty" class="dirty">有未保存的修改</span>
         <el-button size="small" type="primary" @click="save">保存规则</el-button>
