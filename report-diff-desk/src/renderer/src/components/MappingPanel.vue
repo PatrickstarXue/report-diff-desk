@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { GridCell } from '@shared/types'
 import { buildMergeSpans } from '@shared/core/merge'
@@ -9,11 +9,30 @@ import { useDragPan } from '../utils/dragPan'
 import ResizeBar from './ResizeBar.vue'
 
 const session = useSessionStore()
-/** 整体浏览区：滚动容器是这层 div（el-table 未设 height，内部 scrollbar 不溢出） */
-const overviewRef = ref<HTMLElement | null>(null)
+/**
+ * 整体浏览区：el-table 固定高度，横竖滚动都由表体内部的 el-scrollbar 承担。
+ * 外层 div 横向不可能溢出（el-table 是 width:100% + overflow:hidden），
+ * 拿它当滚动容器会让横向彻底滚不动，横向滚动条也会被顶到整张表的最底部。
+ */
+const gridRef = ref<{
+  $el: HTMLElement
+  scrollTo: (o: { top: number }) => void
+  doLayout: () => void
+} | null>(null)
 
 // —— 左键拖拽平移（Ctrl+左键保留原生文本选择） ——
-const { dragging, onMouseDown: startPan } = useDragPan(() => overviewRef.value)
+const { dragging, onMouseDown: startPan } = useDragPan(
+  () =>
+    gridRef.value?.$el.querySelector<HTMLElement>('.el-table__body-wrapper .el-scrollbar__wrap') ??
+    null
+)
+
+/** 仅表体触发平移：表头留给列宽拖拽等原生交互 */
+function onGridMouseDown(e: MouseEvent): void {
+  if (!(e.target as HTMLElement | null)?.closest('.el-table__body-wrapper')) return
+  startPan(e)
+}
+
 const overviewHeight = ref(Math.floor(window.innerHeight * 0.5))
 let resizeStartH = Math.floor(window.innerHeight * 0.5)
 
@@ -22,6 +41,7 @@ function onOverviewResizeStart(): void {
 }
 function onOverviewResize(deltaY: number): void {
   overviewHeight.value = Math.max(120, resizeStartH + deltaY)
+  nextTick(() => gridRef.value?.doLayout())
 }
 
 /** 本次选中是否由页内点击产生：是的话格子本就在眼前，不该再动滚动条 */
@@ -29,7 +49,7 @@ let pickedLocally = false
 
 /** 行高从 DOM 实测：写死 28px 会让跳转落点偏上（小尺寸表格换行后远大于 28） */
 function measuredRowHeight(): number {
-  const row = overviewRef.value?.querySelector<HTMLElement>('.el-table__body tbody tr')
+  const row = gridRef.value?.$el.querySelector<HTMLElement>('.el-table__body tbody tr')
   return row?.offsetHeight || 28
 }
 
@@ -43,7 +63,7 @@ watch(
       return
     }
     setTimeout(() => {
-      overviewRef.value?.scrollTo({ top: Math.max(0, (sel.row - 3) * measuredRowHeight()) })
+      gridRef.value?.scrollTo({ top: Math.max(0, (sel.row - 3) * measuredRowHeight()) })
     }, 100)
   }
 )
@@ -226,22 +246,27 @@ async function removeCurrentDoc(): Promise<void> {
     </div>
 
     <div v-if="activeSheet" class="doc-browser">
-      <div
-        ref="overviewRef"
-        class="doc-overview"
-        :style="{ height: overviewHeight + 'px' }"
-        @mousedown="startPan"
-      >
+      <div class="doc-overview" :style="{ height: overviewHeight + 'px' }">
         <el-table
+          ref="gridRef"
           :data="gridRows"
+          :height="overviewHeight"
           size="small"
           border
           :cell-class-name="cellClass"
           :span-method="spanMethod"
+          @mousedown="onGridMouseDown"
           @cell-click="onCellClick"
           @cell-contextmenu="onCellContextMenu"
         >
-          <el-table-column type="index" label="" width="56" align="right" class-name="row-number-col" />
+          <el-table-column
+            type="index"
+            label=""
+            width="56"
+            align="right"
+            fixed="left"
+            class-name="row-number-col"
+          />
           <el-table-column
             v-for="c in gridColCount"
             :key="c"
@@ -323,11 +348,14 @@ async function removeCurrentDoc(): Promise<void> {
   min-height: 0;
 }
 .doc-overview {
-  overflow: auto;
-  cursor: grab; /* 左键拖拽平移 */
+  overflow: hidden; /* 滚动交给表体内部的 el-scrollbar */
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   background: #fff;
+}
+/* 左键拖拽平移：表体显示抓手光标 */
+.doc-overview :deep(.el-table__body-wrapper .el-scrollbar__wrap) {
+  cursor: grab;
 }
 .doc-detail {
   flex: 1;
