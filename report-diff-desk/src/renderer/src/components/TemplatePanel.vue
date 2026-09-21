@@ -16,6 +16,9 @@ const thresholdPct = ref(0.01)
 /** 子标签页：比对结果 | 对比规则 */
 const subTab = ref('result')
 
+/** 差异列表默认展开；只想看下方网格高亮时收起它 */
+const openPanels = ref<string[]>(['diffs'])
+
 onMounted(() => {
   session.reloadAlignConfig().catch(() => {
     ElMessage.error('规则表配置读取失败，本次会话请勿保存规则以免覆盖')
@@ -276,7 +279,6 @@ function onSideChange(v: string | number | boolean | undefined): void {
     <el-tabs v-model="subTab" class="template-subtabs">
       <el-tab-pane label="比对结果" name="result">
         <div v-if="result" class="panel-toolbar">
-          <span class="hint">共 {{ result.totalDiffs }} 处差异</span>
           <span class="hint">未配对：</span>
           <el-select v-model="manualLeftId" size="small" class="mini-select" placeholder="左侧文件">
             <el-option
@@ -334,31 +336,44 @@ function onSideChange(v: string | number | boolean | undefined): void {
           </template>
         </el-alert>
 
-        <el-table
-          v-if="result"
-          :data="diffRows"
-          size="small"
-          border
-          height="220"
-          highlight-current-row
-          @current-change="onDiffCurrentChange"
-        >
-          <el-table-column label="表号" prop="tableNo" width="70" />
-          <el-table-column label="规则值" prop="diff.rule" min-width="360" show-overflow-tooltip />
-          <el-table-column label="左值" prop="diff.leftText" width="110" show-overflow-tooltip />
-          <el-table-column label="右值" prop="diff.rightText" width="110" show-overflow-tooltip />
-          <el-table-column label="相对差" width="100">
-            <template #default="{ row }">
-              {{ row.diff.relDiff === null ? '—' : (row.diff.relDiff * 100).toFixed(4) + '%' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="类型" width="110">
-            <template #default="{ row }">
-              <el-tag v-if="row.diff.kind === 'diff'" type="danger" size="small">差额</el-tag>
-              <el-tag v-else type="warning" size="small">单侧有值</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <el-collapse v-if="result" v-model="openPanels" class="only-collapse">
+          <el-collapse-item :title="`差异（共 ${result.totalDiffs} 处）`" name="diffs">
+            <el-table
+              :data="diffRows"
+              size="small"
+              border
+              height="220"
+              highlight-current-row
+              @current-change="onDiffCurrentChange"
+            >
+              <el-table-column label="表号" prop="tableNo" width="70" />
+              <el-table-column
+                label="规则值"
+                prop="diff.rule"
+                min-width="360"
+                show-overflow-tooltip
+              />
+              <el-table-column label="左值" prop="diff.leftText" width="110" show-overflow-tooltip />
+              <el-table-column
+                label="右值"
+                prop="diff.rightText"
+                width="110"
+                show-overflow-tooltip
+              />
+              <el-table-column label="相对差" width="100">
+                <template #default="{ row }">
+                  {{ row.diff.relDiff === null ? '—' : (row.diff.relDiff * 100).toFixed(4) + '%' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="110">
+                <template #default="{ row }">
+                  <el-tag v-if="row.diff.kind === 'diff'" type="danger" size="small">差额</el-tag>
+                  <el-tag v-else type="warning" size="small">单侧有值</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
 
         <TemplateGrid v-if="result" />
 
