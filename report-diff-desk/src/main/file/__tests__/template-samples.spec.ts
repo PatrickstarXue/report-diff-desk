@@ -67,21 +67,26 @@ describe.skipIf(!hasSamples)('表样核对 · 真实样例端到端', () => {
     expect(res.diffs.some((d) => d.rule.endsWith('/合计_发生额'))).toBe(false)
   })
 
-  it('R31 ↔ NR31：种子状态下活期组两行配不上', () => {
+  it('R31 ↔ NR31：命中 3 处超阈值差异，含阈值下沿', () => {
     const res = checkTemplates(parseWorkbook(load('R31.xls')), parseWorkbook(load('NR31.xls')), {
       threshold: T
     })
     expect(res.left?.error).toBeUndefined()
     expect(res.right?.error).toBeUndefined()
-    // R31 的 A6:B7 是空合并格，活期组只剩「单位存款」/「个人存款」，配不上 NR31 的「一、活期/…」
-    expect(res.onlyInLeft.some((e) => e.rule.startsWith('单位存款_'))).toBe(true)
-    expect(res.onlyInRight.some((e) => e.rule.startsWith('一、活期/单位存款_'))).toBe(true)
+    expect(res.totalCompared).toBeGreaterThan(0)
+    // D=(-∞,-30) 1.1 vs 1（9.09%）、E=[-30,-10) 2.1 vs 2（4.76%）、N=合计 19.2001 vs 19（1.04%）
+    expect(res.diffs.some((d) => d.leftText === '1.1' && d.rightText === '1')).toBe(true)
+    expect(res.diffs.some((d) => d.leftText === '2.1' && d.rightText === '2')).toBe(true)
+    expect(res.diffs.some((d) => d.leftText === '19.2001' && d.rightText === '19')).toBe(true)
+    // 阈值下沿：2.0001 vs 2 = 0.005%，必须不标
+    expect(res.diffs.some((d) => d.leftText === '2.0001')).toBe(false)
   })
 
-  it('R31 ↔ NR31：规则表把活期组两行对齐后命中 3 处，含阈值下沿', () => {
+  it('R31 ↔ NR31：走规则表路径仍命中同样 3 处', () => {
     const l = parseWorkbook(load('R31.xls'))
     const r = parseWorkbook(load('NR31.xls'))
-    // 把左侧第 5、6 行（0 起始）的规则值改成与右侧同位置一致
+    // 把左侧第 5、6 行（0 起始）的规则值改成与右侧同位置一致。
+    // 两侧本来就一致时这是一次空操作；不一致（缺父级标签）时正是人工对齐的路径。
     const ruleTable: RuleTablePair = { left: {}, right: {} }
     for (const row of [5, 6]) {
       for (const c of l.cells.filter((x) => x.row === row)) {
@@ -92,15 +97,10 @@ describe.skipIf(!hasSamples)('表样核对 · 真实样例端到端', () => {
     const res = checkTemplates(l, r, { threshold: T, ruleTable })
 
     expect(res.totalCompared).toBeGreaterThan(0)
-    // D=(-∞,-30) 1.1 vs 1（9.09%）、E=[-30,-10) 2.1 vs 2（4.76%）、N=合计 19.2001 vs 19（1.04%）
     expect(res.diffs.some((d) => d.leftText === '1.1' && d.rightText === '1')).toBe(true)
     expect(res.diffs.some((d) => d.leftText === '2.1' && d.rightText === '2')).toBe(true)
     expect(res.diffs.some((d) => d.leftText === '19.2001' && d.rightText === '19')).toBe(true)
-    // 阈值下沿：2.0001 vs 2 = 0.005%，必须不标
     expect(res.diffs.some((d) => d.leftText === '2.0001')).toBe(false)
-    // 对齐后这两行不再残留未配上
-    expect(res.onlyInLeft.some((e) => e.rule.startsWith('单位存款_'))).toBe(false)
-    expect(res.onlyInRight.some((e) => e.rule.startsWith('一、活期/单位存款_'))).toBe(false)
   })
 
   it('清空某格规则值即把它排除出比对', () => {

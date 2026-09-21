@@ -195,8 +195,10 @@ export function parseTemplateSheet(input: {
         seed: ruleValueOf(rowPath, colPath)
       })
     }
-    // 有值行：至少一个数据格可数值化（注释行/表尾行因此被自然排除）
-    if (rowCells.some((x) => x.num !== null)) cells.push(...rowCells)
+    // 只按「有没有数据格」判行，不要求格里有数值：整行为空的行必须保留，
+    // 否则「一侧为空、另一侧有值」会配不上，退化成未配上而不是判据表里的「单侧有值」。
+    // 注释行/表尾行仍被自然排除——它们的数据区被整行合并覆盖（rowCells 为空），或标签列为空（rowPath 为空）。
+    if (rowCells.length > 0) cells.push(...rowCells)
   }
 
   return { ...base, cells, degraded: false }

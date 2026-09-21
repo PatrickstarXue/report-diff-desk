@@ -158,7 +158,8 @@ async function openSide(side: 'left' | 'right'): Promise<void> {
   try {
     await session.loadTemplateSide(side, res.path)
     ElMessage.success(`已加载：${templateKeyOf(res.path)}`)
-    await session.runTemplateCheck()
+    // 保留当前表对：重新上传后仍停在你正在维护的那一张，不会跳回第 1 对
+    await session.runTemplateCheck({ keepPairIndex: true })
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }
@@ -342,8 +343,7 @@ function onSideChange(v: string | number | boolean | undefined): void {
       </el-tab-pane>
 
       <el-tab-pane label="对比规则" name="rules">
-        <RulePanel v-if="result" />
-        <el-empty v-else description="先完成一次核对，再来维护规则表" />
+        <RulePanel />
       </el-tab-pane>
     </el-tabs>
   </div>

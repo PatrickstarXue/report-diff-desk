@@ -178,9 +178,17 @@ describe('parseTemplateSheet', () => {
     expect(t.cells[0].num).toBe(9)
   })
 
-  it('数据列全空的行不产出 cells（两侧都空即无差异）', () => {
+  it('整行数据格为空的行仍保留（否则单侧有值会退化成未配上）', () => {
     const t = parse(anchoredSheet([[5, 3, null]]))
-    expect(t.cells).toHaveLength(0)
+    expect(t.cells).toHaveLength(1)
+    expect(t.cells[0].num).toBeNull()
+    expect(t.cells[0].seed).toBe('贴现/银承/3个月_发生额')
+  })
+
+  it('标签列为空的行才被排除（注释行/表尾行）', () => {
+    // anchoredSheet 只在第 5 行给了标签，其余行的标签列为空
+    const t = parse(anchoredSheet([[5, 3, 1]]))
+    expect(t.cells.every((c) => c.row === 5)).toBe(true)
   })
 
   it('数据区合并覆盖格跳过，只取主格值', () => {

@@ -1,24 +1,53 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import { colLetter } from '@shared/core/sheet-view'
 import type { TemplateCellRef } from '@shared/types'
 
 const props = defineProps<{
   title: string
+  /** 解析出的数据格；只读预览已保存规则表时为空，此时行列与标签从 modelValue 推导 */
   cells: TemplateCellRef[]
   /** 位置键 `"row,col"` → 规则值（含空串=不比对） */
   modelValue: Record<string, string>
   /** 对侧的规则值集合，用于标记哪些格子已配上 */
   peerValues: Set<string>
+  /** 只读：没有上传报表时仅展示已保存的规则表 */
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: Record<string, string>): void
 }>()
 
-/** 有值的行/列（按出现顺序去重） */
-const rowList = computed(() => [...new Set(props.cells.map((c) => c.row))])
-const colList = computed(() => [...new Set(props.cells.map((c) => c.col))])
+const hasCells = computed(() => props.cells.length > 0)
+
+const positions = computed(() => {
+  const rows = new Set<number>()
+  const cols = new Set<number>()
+  for (const k of Object.keys(props.modelValue)) {
+    const [r, c] = k.split(',')
+    const rn = Number(r)
+    const cn = Number(c)
+    if (!Number.isNaN(rn)) rows.add(rn)
+    if (!Number.isNaN(cn)) cols.add(cn)
+  }
+  return {
+    rows: [...rows].sort((a, b) => a - b),
+    cols: [...cols].sort((a, b) => a - b)
+  }
+})
+
+const rowList = computed(() =>
+  hasCells.value
+    ? [...new Set(props.cells.map((c) => c.row))].sort((a, b) => a - b)
+    : positions.value.rows
+)
+const colList = computed(() =>
+  hasCells.value
+    ? [...new Set(props.cells.map((c) => c.col))].sort((a, b) => a - b)
+    : positions.value.cols
+)
 
 /** (row,col) → 该格的标签来源 */
 const cellAt = computed(() => {
@@ -27,23 +56,31 @@ const cellAt = computed(() => {
   return m
 })
 
-const seedOf = (row: number, col: number): string => cellAt.value.get(`${row},${col}`)?.seed ?? ''
 const rowLabel = (row: number): string =>
-  cellAt.value.get(`${row},${colList.value[0]}`)?.rowPath ?? ''
+  cellAt.value.get(`${row},${colList.value[0]}`)?.rowPath ?? `第${row + 1}行`
 const colLabel = (col: number): string =>
-  cellAt.value.get(`${rowList.value[0]},${col}`)?.colPath ?? ''
+  cellAt.value.get(`${rowList.value[0]},${col}`)?.colPath ?? colLetter(col)
+
+/** 该位置是否有数据格（可编辑视图）；只读预览时以已保存的键为准 */
+function exists(row: number, col: number): boolean {
+  const key = `${row},${col}`
+  return hasCells.value ? cellAt.value.has(key) : props.modelValue[key] !== undefined
+}
+
+const seedOf = (row: number, col: number): string => cellAt.value.get(`${row},${col}`)?.seed ?? ''
 
 /** 生效规则值：草稿有该位置则以其为准（空串=不比对），否则用种子 */
 function valueAt(row: number, col: number): string {
   const v = props.modelValue[`${row},${col}`]
-  return v === undefined ? seedOf(row, col) : v
+  if (v !== undefined) return v
+  return hasCells.value ? seedOf(row, col) : ''
 }
 
 const rows = computed(() =>
   rowList.value.map((row) => ({
     row,
     label: rowLabel(row),
-    cells: colList.value.map((col) => ({ col, exists: cellAt.value.has(`${row},${col}`) }))
+    cells: colList.value.map((col) => ({ col, exists: exists(row, col) }))
   }))
 )
 
@@ -58,7 +95,7 @@ const setInputRef = (el: unknown): void => {
 }
 
 async function startEdit(row: number, col: number): Promise<void> {
-  if (!cellAt.value.has(`${row},${col}`)) return
+  if (props.readonly || !exists(row, col)) return
   editing.value = { row, col }
   editingText.value = valueAt(row, col)
   await nextTick()
@@ -83,6 +120,7 @@ function commitEdit(): void {
 
 /** 整行 / 整列批量设置：把该范围内的规则值一次改成同一个 */
 async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
+  if (props.readonly) return
   const hint = kind === 'row' ? rowLabel(index) : colLabel(index)
   let v: string
   try {
@@ -97,13 +135,9 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
   }
   const next = { ...props.modelValue }
   if (kind === 'row') {
-    for (const col of colList.value) {
-      if (cellAt.value.has(`${index},${col}`)) put(next, index, col, v)
-    }
+    for (const col of colList.value) if (exists(index, col)) put(next, index, col, v)
   } else {
-    for (const row of rowList.value) {
-      if (cellAt.value.has(`${row},${index}`)) put(next, row, index, v)
-    }
+    for (const row of rowList.value) if (exists(row, index)) put(next, row, index, v)
   }
   emit('update:modelValue', next)
 }
@@ -119,7 +153,9 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
             <th class="corner"></th>
             <th v-for="col in colList" :key="col" class="col-head">
               <span class="head-text">{{ colLabel(col) }}</span>
-              <el-button link size="small" @click="bulkSet('col', col)">批量</el-button>
+              <el-button v-if="!readonly" link size="small" @click="bulkSet('col', col)">
+                批量
+              </el-button>
             </th>
           </tr>
         </thead>
@@ -127,7 +163,9 @@ async function bulkSet(kind: 'row' | 'col', index: number): Promise<void> {
           <tr v-for="r in rows" :key="r.row">
             <th class="row-head">
               <span class="head-text">{{ r.label }}</span>
-              <el-button link size="small" @click="bulkSet('row', r.row)">批量</el-button>
+              <el-button v-if="!readonly" link size="small" @click="bulkSet('row', r.row)">
+                批量
+              </el-button>
             </th>
             <td
               v-for="c in r.cells"
