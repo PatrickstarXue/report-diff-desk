@@ -1,17 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSessionStore } from '../stores/session'
 import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useDragPan } from '../utils/dragPan'
 
 const session = useSessionStore()
-
-const emit = defineEmits<{
-  (e: 'pick-pair', row: number, col: number): void
-  (e: 'ignore', row: number, col: number): void
-  (e: 'cell-click', row: number, col: number): void
-}>()
 
 const gridRef = ref<{
   $el: HTMLElement
@@ -56,57 +50,9 @@ function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: n
   return classes.join(' ')
 }
 
-/** 点格统一上报给 TemplatePanel，由它决定当前是配对模式、表样范围模式还是普通点击 */
-function onCellClick(row: { _rowIndex: number }, column: { property?: string }): void {
-  if (dragging.value) return // 拖拽平移结束的这次点击不应当作选格
-  const prop = column?.property
-  if (typeof prop !== 'string' || !prop.startsWith('c')) return
-  const c = Number(prop.slice(1))
-  if (Number.isNaN(c)) return
-  emit('cell-click', row._rowIndex, c)
-}
-
-// —— 右键菜单：指定配对 / 忽略 ——
-
-const ctxMenu = ref<{ row: number; col: number; x: number; y: number } | null>(null)
-
-function closeCtxMenu(): void {
-  ctxMenu.value = null
-}
-
-function onCellContextMenu(
-  row: { _rowIndex: number },
-  column: { property?: string },
-  _cell: unknown,
-  event: MouseEvent
-): void {
-  const prop = column?.property
-  if (typeof prop !== 'string' || !prop.startsWith('c')) return
-  const c = Number(prop.slice(1))
-  if (Number.isNaN(c)) return
-  event.preventDefault()
-  ctxMenu.value = { row: row._rowIndex, col: c, x: event.clientX, y: event.clientY }
-}
-
-function startPick(): void {
-  const m = ctxMenu.value
-  closeCtxMenu()
-  if (m) emit('pick-pair', m.row, m.col)
-}
-
-function ignoreCell(): void {
-  const m = ctxMenu.value
-  closeCtxMenu()
-  if (m) emit('ignore', m.row, m.col)
-}
-
-// 全局单击任意位置关闭右键菜单
-onMounted(() => document.addEventListener('click', closeCtxMenu))
-onUnmounted(() => document.removeEventListener('click', closeCtxMenu))
-
 // —— 左键拖拽平移（Ctrl+左键保留原生文本选择），与 SheetGrid 一致 ——
 
-const { dragging, onMouseDown: startPan } = useDragPan(
+const { onMouseDown: startPan } = useDragPan(
   () =>
     gridRef.value?.$el.querySelector<HTMLElement>('.el-table__body-wrapper .el-scrollbar__wrap') ??
     null
@@ -140,8 +86,6 @@ watch(
       :cell-class-name="cellClass"
       :span-method="spanMethod"
       @mousedown="onGridMouseDown"
-      @cell-click="onCellClick"
-      @cell-contextmenu="onCellContextMenu"
     >
       <el-table-column
         type="index"
@@ -162,14 +106,6 @@ watch(
         <template #default="{ row }">{{ cellText(row._rowIndex, c - 1) }}</template>
       </el-table-column>
     </el-table>
-    <div
-      v-if="ctxMenu"
-      class="template-ctx-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-    >
-      <div class="ctx-item" @click="startPick">指定配对…</div>
-      <div class="ctx-item" @click="ignoreCell">忽略此项</div>
-    </div>
   </div>
 </template>
 
@@ -200,25 +136,5 @@ watch(
   text-align: center;
   font-weight: 600;
   vertical-align: middle;
-}
-.template-ctx-menu {
-  position: fixed;
-  z-index: 3000;
-  background: #fff;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  padding: 4px 0;
-  min-width: 160px;
-}
-.template-ctx-menu .ctx-item {
-  padding: 8px 16px;
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.template-ctx-menu .ctx-item:hover {
-  background: #f5f7fa;
-  color: #409eff;
 }
 </style>

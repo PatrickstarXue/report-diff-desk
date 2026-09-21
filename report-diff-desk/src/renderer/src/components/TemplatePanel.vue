@@ -1,32 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AlignPairRule, TemplateDiff } from '@shared/types'
+import { ElMessage } from 'element-plus'
+import type { TemplateDiff } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
-import { colLetters } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import TemplateGrid from './TemplateGrid.vue'
+import RulePanel from './RulePanel.vue'
 
 const session = useSessionStore()
-
-/** 0 起始坐标 → 1 起始 Excel 坐标（如 row 3 / col 0 → A4），用于点选回显 */
-function a1(row: number, col: number): string {
-  return `${colLetters(col + 1)[col]}${row + 1}`
-}
 
 /** 阈值输入用百分数（0.01 = 0.01%），与现有环比比对一致 */
 const thresholdPct = ref(0.01)
 
-/** 配对模式：已点选的源格及其所在侧（null = 非配对模式） */
-const pickSource = ref<{ row: number; col: number; side: 'left' | 'right' } | null>(null)
-/** 表样范围模式：已武装，等待点选 */
-const rangeArmed = ref(false)
-/** 表样范围模式：已点选的左上角 */
-const rangeStart = ref<{ row: number; col: number } | null>(null)
+/** 子标签页：比对结果 | 对比规则 */
+const subTab = ref('result')
 
 onMounted(() => {
   session.reloadAlignConfig().catch(() => {
-    ElMessage.error('人工规则配置读取失败，本次会话请勿保存规则以免覆盖')
+    ElMessage.error('规则表配置读取失败，本次会话请勿保存规则以免覆盖')
   })
 })
 
@@ -37,17 +28,13 @@ watch(thresholdPct, (v) => {
 const result = computed(() => session.templateResult)
 const pair = computed(() => session.activeTemplatePair)
 
-/** 当前表对两侧的表样键，人工规则按这对键读写 */
-const keyL = computed(() => templateKeyOf(pair.value?.left?.fileName ?? ''))
-const keyR = computed(() => templateKeyOf(pair.value?.right?.fileName ?? ''))
-
 /** 差异拍平成一张表，带表对索引 */
 const diffRows = computed(() => {
   const out: { key: string; tableNo: string; diff: TemplateDiff; pairIndex: number }[] = []
   ;(result.value?.pairs ?? []).forEach((p, pi) => {
     for (const d of p.diffs) {
       out.push({
-        key: `${pi}|${d.leftRow},${d.leftCol}|${d.rowPath}|${d.colPath}`,
+        key: `${pi}|${d.leftRow},${d.leftCol}|${d.rule}`,
         tableNo: p.tableNo ?? '—',
         diff: d,
         pairIndex: pi
@@ -57,23 +44,41 @@ const diffRows = computed(() => {
   return out
 })
 
+/** 未配上的规则值（到「对比规则」页把两侧改成一致，或清空该格） */
 const onlyRows = computed(() => {
-  const out: { key: string; tableNo: string; side: string; path: string }[] = []
+  const out: { key: string; tableNo: string; side: string; rule: string }[] = []
   ;(result.value?.pairs ?? []).forEach((p, pi) => {
     for (const e of p.onlyInLeft) {
       out.push({
-        key: `${pi}|L|${e.row},${e.col}`,
+        key: `${pi}|L|${e.cell.row},${e.cell.col}`,
         tableNo: p.tableNo ?? '—',
         side: '左',
-        path: `${e.rowPath} / ${e.colPath}`
+        rule: e.rule
       })
     }
     for (const e of p.onlyInRight) {
       out.push({
-        key: `${pi}|R|${e.row},${e.col}`,
+        key: `${pi}|R|${e.cell.row},${e.cell.col}`,
         tableNo: p.tableNo ?? '—',
         side: '右',
-        path: `${e.rowPath} / ${e.colPath}`
+        rule: e.rule
+      })
+    }
+  })
+  return out
+})
+
+/** 规则值重复（同值在一侧出现多次 → 该值整体不配对） */
+const dupRows = computed(() => {
+  const out: { key: string; tableNo: string; side: string; rule: string; count: number }[] = []
+  ;(result.value?.pairs ?? []).forEach((p, pi) => {
+    for (const e of p.duplicateRules) {
+      out.push({
+        key: `${pi}|${e.side}|${e.rule}`,
+        tableNo: p.tableNo ?? '—',
+        side: e.side === 'left' ? '左' : '右',
+        rule: e.rule,
+        count: e.count
       })
     }
   })
@@ -90,18 +95,14 @@ const pairOptions = computed(() =>
 /** 解析失败的表提示（两侧任一侧有 error 就显示） */
 const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.error ?? '')
 
-/** 当前处于哪种点选模式 */
-const pickHint = computed(() => {
-  if (pickSource.value) return '配对模式：请点击目标单元格'
-  if (rangeArmed.value) {
-    if (!rangeStart.value) return '表头区：请点击左上角单元格（写有「项 目」的那一格）'
-    const start = a1(rangeStart.value.row, rangeStart.value.col)
-    return `表头区左上角已选 ${start}，请点击右下角单元格（最后一个列标题所在格）`
-  }
-  return ''
-})
+/** 锚点未识别、已按行列位置降级解析：种子是「第N行_列字母」，需人工在规则表里对齐 */
+const degradedHint = computed(() =>
+  pair.value?.left?.degraded || pair.value?.right?.degraded
+    ? '该表对有一侧没能识别到「项 目」锚点，已按行列位置降级解析——规则值形如「第6行_D」，请在「对比规则」页人工对齐。'
+    : ''
+)
 
-/** 该表对一格都没能自动配对（行标签路径两侧对不上），需要人工配对 */
+/** 该表对一格都没配上，需要到规则表里把两侧规则值改一致 */
 const noAutoPairHint = computed(() => {
   const p = pair.value
   if (!p) return false
@@ -174,189 +175,12 @@ function onDiffCurrentChange(row: { diff: TemplateDiff; pairIndex: number } | nu
 function onPairIndexChange(v: number): void {
   session.templatePairIndex = v
   session.templateFocus = null
-  // 点选态不带表对身份：新表对同坐标恰好有格时会写出一条错误规则，必须清空
-  pickSource.value = null
-  rangeStart.value = null
-  rangeArmed.value = false
 }
 
 function onSideChange(v: string | number | boolean | undefined): void {
   if (v !== 'left' && v !== 'right') return
   session.templateSide = v
   session.templateFocus = null
-  pickSource.value = null
-  rangeStart.value = null
-  rangeArmed.value = false
-}
-
-// —— 人工规则读写 ——
-
-/** 合并写入：同表样对、同源格的旧规则被替换，其余规则原样保留；写盘失败提示并返回 false */
-async function saveRules(newRules: AlignPairRule[]): Promise<boolean> {
-  // 未就绪（读取失败）时以空基准合并会整体覆盖盘上旧规则，直接拒绝写入
-  const base = session.alignConfig
-  if (!base) {
-    ElMessage.error('配置未就绪，已放弃保存以避免覆盖已有规则')
-    return false
-  }
-  const keys = new Set(newRules.map((r) => `${r.left}|${r.right}|${r.fromRow}|${r.fromCol}`))
-  const kept = base.pairs.filter((p) => !keys.has(`${p.left}|${p.right}|${p.fromRow}|${p.fromCol}`))
-  try {
-    await session.saveAlignConfig({
-      version: 1,
-      templates: base.templates,
-      pairs: [...kept, ...newRules]
-    })
-    return true
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : String(err))
-    return false
-  }
-}
-
-/** 忽略规则恒以左侧坐标为键 */
-async function ignoreDiff(d: TemplateDiff): Promise<void> {
-  const ok = await saveRules([
-    { left: keyL.value, right: keyR.value, fromRow: d.leftRow, fromCol: d.leftCol, ignored: true }
-  ])
-  if (ok) ElMessage.success('已忽略，下次核对自动跳过')
-}
-
-/** 网格右键「忽略此项」：由当前侧坐标反查差异条目 */
-async function ignoreAt(row: number, col: number): Promise<void> {
-  const p = pair.value
-  if (!p) return
-  const isLeft = session.templateSide === 'left'
-  const d = p.diffs.find((x) =>
-    isLeft ? x.leftRow === row && x.leftCol === col : x.rightRow === row && x.rightCol === col
-  )
-  if (!d) {
-    ElMessage.warning('该单元格不在差异列表中，无需忽略')
-    return
-  }
-  await ignoreDiff(d)
-}
-
-async function clearTableRules(): Promise<void> {
-  const base = session.alignConfig
-  if (!base) {
-    ElMessage.error('配置未就绪，已放弃清除以避免覆盖已有规则')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `清除 ${keyL.value} ↔ ${keyR.value} 的人工配对、忽略规则，以及两侧（${keyL.value} / ${keyR.value}）的表头区指定？清除后表头区恢复「项 目」锚点自动识别。`,
-      '确认',
-      { type: 'warning' }
-    )
-  } catch {
-    return
-  }
-  try {
-    // 两侧表样范围一并清除：回到锚点自动识别
-    const templates = { ...base.templates }
-    delete templates[keyL.value]
-    delete templates[keyR.value]
-    await session.saveAlignConfig({
-      version: 1,
-      templates,
-      pairs: base.pairs.filter((p) => !(p.left === keyL.value && p.right === keyR.value))
-    })
-    ElMessage.success('已清除')
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : String(err))
-  }
-}
-
-// —— 网格点选：配对与表样范围两种模式共用同一次 cell-click 上报 ——
-
-function onPickPair(row: number, col: number): void {
-  rangeArmed.value = false
-  rangeStart.value = null
-  pickSource.value = { row, col, side: session.templateSide }
-  ElMessage.info('请切换到另一侧，点击要配对的目标单元格')
-}
-
-function startRangePick(): void {
-  pickSource.value = null
-  rangeStart.value = null
-  rangeArmed.value = true
-  const key = templateKeyOf(session.activeTemplateWorkbook?.fileName ?? '')
-  ElMessage.info(
-    `手动指定 ${key} 的表头区（不是整张表，也不是数据区）：请点击左上角单元格，即写有「项 目」的那一格`
-  )
-}
-
-async function onCellClick(row: number, col: number): Promise<void> {
-  if (pickSource.value) {
-    await finishPair(row, col)
-    return
-  }
-  if (rangeArmed.value) await finishRange(row, col)
-}
-
-async function finishPair(row: number, col: number): Promise<void> {
-  const src = pickSource.value
-  pickSource.value = null
-  if (!src) return
-  // 目标格必须在对侧：同侧点击不写规则，退出配对模式
-  if (session.templateSide === src.side) {
-    ElMessage.warning('请切换到另一侧，点击要配对的目标单元格')
-    return
-  }
-  // 规则恒为 {left: R 系列键, right: NR 系列键}，from 指左侧格、to 指右侧格
-  const rule: AlignPairRule =
-    src.side === 'left'
-      ? {
-          left: keyL.value,
-          right: keyR.value,
-          fromRow: src.row,
-          fromCol: src.col,
-          toRow: row,
-          toCol: col
-        }
-      : {
-          left: keyL.value,
-          right: keyR.value,
-          fromRow: row,
-          fromCol: col,
-          toRow: src.row,
-          toCol: src.col
-        }
-  const ok = await saveRules([rule])
-  if (ok) ElMessage.success('已保存配对，下次核对自动生效')
-}
-
-async function finishRange(row: number, col: number): Promise<void> {
-  if (!rangeStart.value) {
-    // 第一次点击：记左上角，继续等右下角
-    rangeStart.value = { row, col }
-    ElMessage.info(`左上角已选 ${a1(row, col)}，请点击表头区右下角（最后一个列标题所在格）`)
-    return
-  }
-  const start = rangeStart.value
-  rangeStart.value = null
-  rangeArmed.value = false
-  const key = templateKeyOf(session.activeTemplateWorkbook?.fileName ?? '')
-  if (!key) return
-  try {
-    // 保存与校验都在 store 里：坏范围会把该侧弄成「表头区未识别到数据列」，由 store 自动回滚
-    const ok = await session.setTemplateHeaderRange({
-      r1: Math.min(start.row, row),
-      c1: Math.min(start.col, col),
-      r2: Math.max(start.row, row),
-      c2: Math.max(start.col, col)
-    })
-    if (ok) {
-      ElMessage.success(`已保存 ${key} 的表头区（${a1(Math.min(start.row, row), Math.min(start.col, col))} → ${a1(Math.max(start.row, row), Math.max(start.col, col))}）`)
-    } else {
-      ElMessage.error(
-        `该范围导致 ${key} 解析失败（${session.templateRangeError}），已回滚到原范围`
-      )
-    }
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : String(err))
-  }
 }
 </script>
 
@@ -401,96 +225,127 @@ async function finishRange(row: number, col: number): Promise<void> {
       >
         <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
       </el-select>
-      <el-radio-group :model-value="session.templateSide" size="small" @update:model-value="onSideChange">
+      <el-radio-group
+        :model-value="session.templateSide"
+        size="small"
+        @update:model-value="onSideChange"
+      >
         <el-radio-button value="left">左侧</el-radio-button>
         <el-radio-button value="right">右侧</el-radio-button>
       </el-radio-group>
-      <el-button size="small" plain @click="startRangePick">手动指定表头区</el-button>
-      <el-button size="small" plain @click="clearTableRules">清除本表对规则</el-button>
-      <span v-if="pair?.manualPairs" class="hint">已应用 {{ pair.manualPairs }} 条人工配对</span>
-      <span v-if="pickHint" class="pick-hint">{{ pickHint }}</span>
       <span v-if="pairError" class="err-hint">{{ pairError }}</span>
     </div>
 
-    <div v-if="result" class="panel-toolbar">
-      <span class="hint">共 {{ result.totalDiffs }} 处差异</span>
-      <span class="hint">未配对：</span>
-      <el-select v-model="manualLeftId" size="small" class="mini-select" placeholder="左侧文件">
-        <el-option v-for="w in unmatchedLeftOptions" :key="w.id" :label="w.fileName" :value="w.id" />
-      </el-select>
-      <el-select v-model="manualRightId" size="small" class="mini-select" placeholder="右侧文件">
-        <el-option v-for="w in unmatchedRightOptions" :key="w.id" :label="w.fileName" :value="w.id" />
-      </el-select>
-      <el-button size="small" :disabled="!manualLeftId || !manualRightId" @click="addManualPair">
-        指定为表对
-      </el-button>
-    </div>
+    <el-tabs v-model="subTab" class="template-subtabs">
+      <el-tab-pane label="比对结果" name="result">
+        <div v-if="result" class="panel-toolbar">
+          <span class="hint">共 {{ result.totalDiffs }} 处差异</span>
+          <span class="hint">未配对：</span>
+          <el-select v-model="manualLeftId" size="small" class="mini-select" placeholder="左侧文件">
+            <el-option
+              v-for="w in unmatchedLeftOptions"
+              :key="w.id"
+              :label="w.fileName"
+              :value="w.id"
+            />
+          </el-select>
+          <el-select v-model="manualRightId" size="small" class="mini-select" placeholder="右侧文件">
+            <el-option
+              v-for="w in unmatchedRightOptions"
+              :key="w.id"
+              :label="w.fileName"
+              :value="w.id"
+            />
+          </el-select>
+          <el-button size="small" :disabled="!manualLeftId || !manualRightId" @click="addManualPair">
+            指定为表对
+          </el-button>
+        </div>
 
-    <el-alert
-      v-if="noAutoPairHint"
-      type="warning"
-      show-icon
-      :closable="false"
-      title="本表对没有任何单元格自动配对成功"
-    >
-      <template #default>
-        两侧的「行标签路径」对不上（通常是某几行缺少父级标签），无法逐格比对。
-        请在下方网格中右键<strong>左侧</strong>要配对的行上任意一格 →「指定配对…」，
-        再在<strong>右侧</strong>点击对应行的任意一格；配对按<strong>行</strong>生效，配一次即可覆盖该行所有列。
-      </template>
-    </el-alert>
+        <el-alert
+          v-if="noAutoPairHint"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="本表对没有任何单元格配对成功"
+        >
+          <template #default>
+            两侧的规则值没有任何一对是相同的（通常是某几行缺少父级标签）。
+            请切到「对比规则」页，把要比较的两侧规则值改成一致；配一次整行即可生效。
+          </template>
+        </el-alert>
 
-    <el-table
-      v-if="result"
-      :data="diffRows"
-      size="small"
-      border
-      height="220"
-      highlight-current-row
-      @current-change="onDiffCurrentChange"
-    >
-      <el-table-column label="表号" prop="tableNo" width="70" />
-      <el-table-column label="项目路径" prop="diff.rowPath" min-width="220" show-overflow-tooltip />
-      <el-table-column label="列" prop="diff.colPath" min-width="140" show-overflow-tooltip />
-      <el-table-column label="左值" prop="diff.leftText" width="110" show-overflow-tooltip />
-      <el-table-column label="右值" prop="diff.rightText" width="110" show-overflow-tooltip />
-      <el-table-column label="相对差" width="100">
-        <template #default="{ row }">
-          {{ row.diff.relDiff === null ? '—' : (row.diff.relDiff * 100).toFixed(4) + '%' }}
-        </template>
-      </el-table-column>
-      <el-table-column label="类型" width="140">
-        <template #default="{ row }">
-          <el-tag v-if="row.diff.kind === 'diff'" type="danger" size="small">差额</el-tag>
-          <el-tag v-else type="warning" size="small">单侧有值</el-tag>
-          <el-tag v-if="row.diff.manual" size="small" class="manual-tag">人工</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column width="80">
-        <template #default="{ row }">
-          <el-button link size="small" type="danger" @click.stop="ignoreDiff(row.diff)">忽略</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        <el-alert
+          v-if="degradedHint"
+          type="info"
+          show-icon
+          :closable="false"
+          :title="degradedHint"
+        />
 
-    <TemplateGrid
-      v-if="result"
-      @pick-pair="onPickPair"
-      @ignore="ignoreAt"
-      @cell-click="onCellClick"
-    />
-
-    <el-collapse v-if="result && onlyRows.length" class="only-collapse">
-      <el-collapse-item :title="`仅单侧存在（${onlyRows.length} 项）`" name="only">
-        <el-table :data="onlyRows" size="small" border max-height="260">
+        <el-table
+          v-if="result"
+          :data="diffRows"
+          size="small"
+          border
+          height="220"
+          highlight-current-row
+          @current-change="onDiffCurrentChange"
+        >
           <el-table-column label="表号" prop="tableNo" width="70" />
-          <el-table-column label="侧" prop="side" width="50" />
-          <el-table-column label="项目路径 / 列" prop="path" min-width="320" show-overflow-tooltip />
+          <el-table-column label="规则值" prop="diff.rule" min-width="360" show-overflow-tooltip />
+          <el-table-column label="左值" prop="diff.leftText" width="110" show-overflow-tooltip />
+          <el-table-column label="右值" prop="diff.rightText" width="110" show-overflow-tooltip />
+          <el-table-column label="相对差" width="100">
+            <template #default="{ row }">
+              {{ row.diff.relDiff === null ? '—' : (row.diff.relDiff * 100).toFixed(4) + '%' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.diff.kind === 'diff'" type="danger" size="small">差额</el-tag>
+              <el-tag v-else type="warning" size="small">单侧有值</el-tag>
+            </template>
+          </el-table-column>
         </el-table>
-      </el-collapse-item>
-    </el-collapse>
 
-    <el-empty v-if="!result" description="选择两套报表（zip）后点击「开始核对」" />
+        <TemplateGrid v-if="result" />
+
+        <el-collapse v-if="result && dupRows.length" class="only-collapse">
+          <el-collapse-item :title="`规则值重复（${dupRows.length} 项，不参与比对）`" name="dup">
+            <div class="only-hint">
+              同一个规则值在一侧出现多次时该值整体不参与比对，请把它们改成各自唯一的值。
+            </div>
+            <el-table :data="dupRows" size="small" border max-height="200">
+              <el-table-column label="表号" prop="tableNo" width="70" />
+              <el-table-column label="侧" prop="side" width="50" />
+              <el-table-column label="规则值" prop="rule" min-width="320" show-overflow-tooltip />
+              <el-table-column label="出现次数" prop="count" width="90" />
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
+
+        <el-collapse v-if="result && onlyRows.length" class="only-collapse">
+          <el-collapse-item :title="`未配上（${onlyRows.length} 项）`" name="only">
+            <div class="only-hint">
+              两侧规则值一致才会比对。请到「对比规则」页把它们改成一致；不想比对就把该格清空。
+            </div>
+            <el-table :data="onlyRows" size="small" border max-height="260">
+              <el-table-column label="表号" prop="tableNo" width="70" />
+              <el-table-column label="侧" prop="side" width="50" />
+              <el-table-column label="规则值" prop="rule" min-width="320" show-overflow-tooltip />
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
+
+        <el-empty v-if="!result" description="选择两套报表（zip）后点击「开始核对」" />
+      </el-tab-pane>
+
+      <el-tab-pane label="对比规则" name="rules">
+        <RulePanel v-if="result" />
+        <el-empty v-else description="先完成一次核对，再来维护规则表" />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -514,11 +369,6 @@ async function finishRange(row: number, col: number): Promise<void> {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.pick-hint {
-  font-size: 12px;
-  color: #d6336c;
-  font-weight: 600;
-}
 .err-hint {
   font-size: 12px;
   color: var(--el-color-danger);
@@ -529,10 +379,12 @@ async function finishRange(row: number, col: number): Promise<void> {
 .mini-select {
   width: 200px;
 }
-.manual-tag {
-  margin-left: 4px;
-}
 .only-collapse {
   margin-top: 4px;
+}
+.only-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  padding: 4px 0;
 }
 </style>
