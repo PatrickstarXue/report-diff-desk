@@ -4,7 +4,6 @@ import { readFile } from 'fs/promises'
 import { read as readXlsx, utils as xlsxUtils } from 'xlsx'
 import type { BatchCompareResult, CellDiff, CompareResult, SheetData } from '@shared/types'
 import { parseExcel } from '../file/excel'
-import { patchXlsHits, type XlsHit } from './xls-patch'
 
 /** 变动格紫色填充（ARGB，浅紫） */
 export const PURPLE_FILL_ARG = 'FFE6E0F8'
@@ -171,42 +170,19 @@ function appendSourceSheets(dst: ExcelJS.Workbook, src: ExportSource, prefix: '�
   }
 }
 
-async function appendPair(dst: ExcelJS.Workbook, compare: CompareResult, baseBuf: Buffer, currBuf: Buffer): Promise<void> {
+async function appendPair(dst: ExcelJS.Workbook, compare: CompareResult, baseBuf: Buffer, currBuf: Buffer): Promise<boolean> {
   const [baseSrc, currSrc] = await Promise.all([loadSource(baseBuf), loadSource(currBuf)])
   appendSourceSheets(dst, baseSrc, '上期', hitMap(compare.diffs, 'base'))
   appendSourceSheets(dst, currSrc, '本期', hitMap(compare.diffs, 'curr'))
-}
-
-/** OLE2（.xls）文件头 —— 比扩展名可靠 */
-function isOle2(buf: Buffer): boolean {
-  return buf.length > 8 && buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0
+  return baseSrc.kind === 'xls' || currSrc.kind === 'xls'
 }
 
 /**
- * 命中格 → patchXlsHits 要的入参。
- * CellDiff 的行列是 1 起始（同 `ref:"C12"`），BIFF 记录里是 0 起始，这里统一减 1。
- */
-function xlsHits(compare: CompareResult, side: 'base' | 'curr'): XlsHit[] {
-  const out: XlsHit[] = []
-  for (const [sheet, set] of hitMap(compare.diffs, side)) {
-    for (const rc of set) {
-      const [row, col] = rc.split('|').map(Number)
-      out.push({ sheet, row: row - 1, col: col - 1 })
-    }
-  }
-  return out
-}
-
-/** 条目名：只取文件名部分，不改扩展名 */
-function entryNameOf(fileName: string): string {
-  return fileName.split('/').pop() ?? fileName
-}
-
-/**
- * 批量比对 → zip 压缩包。
- * - 两侧都是 .xls：**就地打标**（保持 .xls 与原格式），每对输出上期/本期两个文件，文件名不变
- * - 其余（.xlsx 源）：每个文件对一个 xlsx（条目名 = 上期原文件名），内含「上期」「本期」两个 sheet
- * 返回值里的 note 由调用方展示给用户（.xls 的紫色是调色板近似色等）。
+ * 批量比对 → zip 压缩包：每个文件对一个 xlsx（条目名 = 上期原文件名），
+ * 内含「上期」「本期」两个 sheet（按原表格式 + 变动格紫色填充）。
+ *
+ * .xls 源只能走「重建」这条路（exceljs 读不了 biff8，BIFF8 也写不出来），
+ * 因此字体/居中/边框无法保留，note 里如实说明；.xlsx 源是完整保真的。
  */
 export async function buildExcelZipBuffer(
   batch: BatchCompareResult,
@@ -219,44 +195,21 @@ export async function buildExcelZipBuffer(
     throw new Error('原文件与比对结果不一致（文件可能已被修改），请重新加载后再导出')
   }
 
+  let usedXls = false
   const zip = new JSZip()
-  let patched = 0
-  const fallbacks: string[] = []
   for (let i = 0; i < batch.pairs.length; i++) {
     const p = batch.pairs[i]
-    if (isOle2(baseBufs[i]) && isOle2(currBufs[i])) {
-      try {
-        zip.file(entryNameOf(p.baseFileName), patchXlsHits(baseBufs[i], xlsHits(p.compare, 'base')))
-        zip.file(entryNameOf(p.currFileName), patchXlsHits(currBufs[i], xlsHits(p.compare, 'curr')))
-        patched++
-        continue
-      } catch (err) {
-        fallbacks.push(err instanceof Error ? err.message : String(err))
-      }
-    } else if (isOle2(baseBufs[i]) || isOle2(currBufs[i])) {
-      fallbacks.push('两侧格式不一致')
-    }
     const out = new ExcelJS.Workbook()
-    await appendPair(out, p.compare, baseBufs[i], currBufs[i])
+    if (await appendPair(out, p.compare, baseBufs[i], currBufs[i])) usedXls = true
     // 导出内容统一为 xlsx（含 .xls 降级重建），扩展名必须与内容一致
-    const name = entryNameOf(p.baseFileName).replace(/\.xls$/i, '.xlsx')
-    zip.file(name, Buffer.from(await out.xlsx.writeBuffer()))
-  }
-
-  const notes: string[] = []
-  if (patched > 0) {
-    notes.push(
-      `.xls 源已在原文件上就地打标：保持 .xls 与原表格式（字体/居中/边框/列宽/行高/合并全不动），每对输出上期、本期两个文件。` +
-        'BIFF8 只能用调色板色，紫色取的是最接近的 CCCCFF。'
-    )
-  }
-  if (fallbacks.length > 0) {
-    notes.push(
-      `有 ${fallbacks.length} 个文件无法就地打标（${fallbacks[0]}），已退回重建 xlsx：该文件的字体、居中、边框会丢失。`
-    )
+    const entryName = (p.baseFileName.split('/').pop() ?? p.baseFileName).replace(/\.xls$/i, '.xlsx')
+    zip.file(entryName, Buffer.from(await out.xlsx.writeBuffer()))
   }
   return {
     buffer: Buffer.from(await zip.generateAsync({ type: 'nodebuffer' })),
-    note: notes.length > 0 ? notes.join(' ') : undefined
+    note: usedXls
+      ? '源文件里有 .xls：老格式的字体、居中、边框无法保留（数值格式、列宽、行高、合并已尽量带上）。' +
+        '把源另存为 .xlsx 再上传，导出就是一个文件两个 sheet 且与原表一致。'
+      : undefined
   }
 }
