@@ -19,8 +19,8 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 三进程 Electron 应用：main（IO/解析/IPC/导出）、preload（contextBridge 唯一 window.api）、renderer（Vue3 + Element Plus）。所有数据 JSON 序列化通过 IPC。
 
 - **`src/shared/`**：纯逻辑，零 Node/Electron 依赖，vitest 直接测试（node 环境）。核心在 `core/`（engine.ts 环比比对引擎、numeric.ts 数值解析、mapping.ts 口径映射、pairing.ts 顺序配对、merge.ts 合并单元格 span 矩阵、summary.ts 概览汇总、template.ts 新旧表数据比对（规则表配对）、sheet-view.ts 网格渲染纯函数）
-- **`src/main/`**：main 进程。`file/`（excel.ts/zip.ts/docx.ts/pdf.ts/txt.ts/loader.ts 分格式解析）、`export/`（excel.ts zip 导出、html.ts 明细导出）、`ipc.ts`（全部 ipcMain.handle + 入参校验）、`store.ts`（工作簿会话缓存）、`align.ts`（规则表持久化）
-- **`src/renderer/src/`**：renderer 进程。`stores/session.ts`（Pinia 全局状态：比对/网格焦点/文档库/规则表草稿）、`components/`（FilePanel/SheetGrid/DiffList/MappingPanel/DocViewer/PdfViewer/OverviewPanel/ResizeBar/TemplatePanel/TemplateGrid/RulePanel/RuleTable/ZoomBadge）、`utils/`（dragPan 左键拖拽平移、zoom Ctrl+滚轮缩放）、`App.vue`（布局 + 版本信息；标签页：报表环比 / 环比结果概览 / 口径查询 / 口径文档 / 新旧表数据比对）
+- **`src/main/`**：main 进程。`file/`（excel.ts/zip.ts/docx.ts/pdf.ts/txt.ts/loader.ts 分格式解析）、`export/`（excel.ts zip 导出、html.ts 明细导出、wps.ts 借本机 WPS/Excel 的 COM 把 .xls 转 .xlsx）、`ipc.ts`（全部 ipcMain.handle + 入参校验）、`store.ts`（工作簿会话缓存）、`align.ts`（规则表持久化）
+- **`src/renderer/src/`**：renderer 进程。`stores/session.ts`（Pinia 全局状态：比对/网格焦点/文档库/规则表草稿）、`components/`（FilePanel/SheetGrid/DiffList/MappingPanel/DocViewer/PdfViewer/OverviewPanel/ResizeBar/TemplatePanel/TemplateGrid/RulePanel/RuleTable/ZoomBadge）、`utils/`（dragPan 左键拖拽平移、zoom Ctrl+滚轮缩放、reveal 跳转定位）、`App.vue`（布局 + 版本信息；标签页：报表环比 / 环比结果概览 / 口径查询 / 口径文档 / 新旧表数据比对）
 - **`src/shared/ipc.ts`**：IPC channel 名常量，main/preload/renderer 三端共用
 - **`src/shared/api.ts`**：window.api 契约接口，preload 逐 channel 包装 ipcRenderer.invoke
 
@@ -36,10 +36,13 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 - **ELECTRON_RUN_AS_NODE=1**：本机 shell 环境变量会干扰 Electron 启动（导致 "exits immediately"），运行 `npm run dev` 或 `build:win` 前需 `Remove-Item env:ELECTRON_RUN_AS_NODE`（PowerShell）或 `unset ELECTRON_RUN_AS_NODE`（bash）
 - **npm 11 阻止 postinstall**：首次安装后需 `npm approve-scripts esbuild electron`
 - **electron-builder node_modules**：main 进程用 `externalizeDepsPlugin()`，所有生产依赖运行时从 node_modules 读取——**不可**在 electron-builder.yml 的 files 里排除 `!node_modules/**`
+- **导出 .xls 保真依赖 WPS/Excel**：`src/main/export/wps.ts` 是 main 进程目前唯一用 `child_process` 的地方，经 PowerShell（`-EncodedCommand`，不落 .ps1 到磁盘以免触发 Defender ASR）驱动 `Excel.Application` COM——WPS 也注册这个 ProgID。只做 .xls → .xlsx 转换，染色与双 sheet 组装仍是 exceljs 的活；仅 win32 生效，探测不到就退回内置重建。改这块前先读该文件顶部注释，里面有 COM 会话的生命周期约束（绝不设 `Visible`、附着到用户实例时不能 `Quit`）
 
 ## 测试
 
-vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export + renderer store/utils），共 150 个用例（148 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）；`src/main/file/__tests__/template-samples.spec.ts` 用 samples/similarSample/ 的真实 xls 走生产解析链路，样例缺失时整组跳过。
+vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export + renderer store/utils），共 164 个用例（162 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）；`src/main/file/__tests__/template-samples.spec.ts` 用 samples/similarSample/ 的真实 xls 走生产解析链路，样例缺失时整组跳过。
+
+`src/main/export/__tests__/export.spec.ts` 里断言 .xls **降级**行为的用例一律显式传 `{ useWps: false }`——否则在装了 WPS 的机器上会走保真转换、note 断言静默失效。真实样例组按 `existsSync(samples/...)`、WPS 保真组再叠一层顶层 `await detectWps()` 做 `describe.skipIf` 门禁，所以用例总数随机器而变。
 
 `src/renderer/src/stores/__tests__/session.template.spec.ts` 用 `structuredClone` 桩模拟 IPC 边界——渲染进程传给 `window.api` 的载荷必须是纯对象（Pinia 响应式 Proxy 会抛 `DataCloneError: An object could not be cloned.`），新增 IPC 调用时照 `session.ts` 里 `JSON.parse(JSON.stringify(...))` 的既有写法深拷贝。
 

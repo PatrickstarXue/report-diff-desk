@@ -4,6 +4,7 @@ import { readFile } from 'fs/promises'
 import { read as readXlsx, utils as xlsxUtils } from 'xlsx'
 import type { BatchCompareResult, CellDiff, CompareResult, SheetData } from '@shared/types'
 import { parseExcel } from '../file/excel'
+import { convertXlsToXlsx, detectWps } from './wps'
 
 /** 变动格紫色填充（ARGB，浅紫） */
 export const PURPLE_FILL_ARG = 'FFE6E0F8'
@@ -50,20 +51,48 @@ function readXlsLayout(buffer: Buffer): Map<string, XlsLayout> {
   return out
 }
 
+/** 源文件条目：名字用来判断扩展名（WPS 按扩展名选解析器，导出条目名也由它推导） */
+interface SourceEntry {
+  name: string
+  buffer: Buffer
+}
+
 /**
  * 按 zip 条目顺序（与顺序配对语义一致）读取全部 xlsx/xls 原始 buffer；
  * 非 zip 单文件返回自身 buffer。
  */
-async function readSourceBuffers(path: string): Promise<Buffer[]> {
+async function readSourceBuffers(path: string): Promise<SourceEntry[]> {
   const buf = await readFile(path)
-  if (!/\.zip$/i.test(path)) return [buf]
+  if (!/\.zip$/i.test(path)) return [{ name: path.split(/[\\/]/).pop() ?? path, buffer: buf }]
   const zip = await JSZip.loadAsync(buf)
-  const out: Buffer[] = []
+  const out: SourceEntry[] = []
   for (const entry of Object.values(zip.files)) {
     if (entry.dir || !/\.(xlsx|xls)$/i.test(entry.name)) continue
-    out.push(Buffer.from(await entry.async('uint8array')))
+    out.push({ name: entry.name, buffer: Buffer.from(await entry.async('uint8array')) })
   }
   return out
+}
+
+const isXlsEntry = (e: SourceEntry): boolean => /\.xls$/i.test(e.name)
+
+/**
+ * 把两侧的 .xls 条目就地换成 WPS 转出来的 .xlsx。一次 COM 会话处理全部，避免多次 WPS 启动开销。
+ * 转换失败时调用方会退回内置重建路径（那条路会如实告知字体/居中/边框无法保留）。
+ */
+async function convertXlsEntries(base: SourceEntry[], curr: SourceEntry[]): Promise<void> {
+  const xlsBase = base.filter(isXlsEntry)
+  const xlsCurr = curr.filter(isXlsEntry)
+  const converted = await convertXlsToXlsx([...xlsBase, ...xlsCurr].map((e) => e.buffer))
+  const apply = (list: SourceEntry[], from: number): void => {
+    let n = from
+    for (const entry of list) {
+      if (!isXlsEntry(entry)) continue
+      entry.buffer = converted[n++]
+      entry.name = entry.name.replace(/\.xls$/i, '.xlsx')
+    }
+  }
+  apply(base, 0)
+  apply(curr, xlsBase.length)
 }
 
 /** xlsx：exceljs 读取保留原样式；.xls：exceljs 不支持 biff8，降级为 SheetJS 解析值 + 能读到的排版 */
@@ -117,7 +146,11 @@ function markHits(cellAt: (r: number, c: number) => ExcelJS.Cell, sheetName: str
   if (!set) return
   for (const rc of set) {
     const [r, c] = rc.split('|').map(Number)
-    cellAt(r, c).fill = PURPLE_FILL
+    const cell = cellAt(r, c)
+    // exceljs 的 Cell.model setter 按引用接管 style（实测 701 个非空格只对应 27 个 style 对象），
+    // 而这些引用又是从源表 model 直接搬过来的，直接写 cell.fill 会把所有共用该样式的格子一起染紫。
+    // 先换成一个属于本格的 style 对象再写。
+    cell.style = { ...cell.style, fill: PURPLE_FILL }
   }
 }
 
@@ -181,18 +214,32 @@ async function appendPair(dst: ExcelJS.Workbook, compare: CompareResult, baseBuf
  * 批量比对 → zip 压缩包：每个文件对一个 xlsx（条目名 = 上期原文件名），
  * 内含「上期」「本期」两个 sheet（按原表格式 + 变动格紫色填充）。
  *
- * .xls 源只能走「重建」这条路（exceljs 读不了 biff8，BIFF8 也写不出来），
- * 因此字体/居中/边框无法保留，note 里如实说明；.xlsx 源是完整保真的。
+ * .xls 源先用本机 WPS/Excel 转成 .xlsx（见 wps.ts），之后与 .xlsx 源走同一条完整保真的路径；
+ * 没有 WPS 或转换失败时退回「重建」——exceljs 读不了 biff8、BIFF8 也写不出来，
+ * 那条路字体/居中/边框保留不了，note 里如实说明。
+ *
+ * @param opts.useWps 缺席 = 自动（有 .xls 源且检测到 WPS 时启用）；false = 强制走重建路径；true = 强制尝试转换
  */
 export async function buildExcelZipBuffer(
   batch: BatchCompareResult,
   basePath: string,
-  currPath: string
+  currPath: string,
+  opts?: { useWps?: boolean }
 ): Promise<{ buffer: Buffer; note?: string }> {
-  const baseBufs = await readSourceBuffers(basePath)
-  const currBufs = await readSourceBuffers(currPath)
-  if (baseBufs.length < batch.pairs.length || currBufs.length < batch.pairs.length) {
+  const baseEntries = await readSourceBuffers(basePath)
+  const currEntries = await readSourceBuffers(currPath)
+  if (baseEntries.length < batch.pairs.length || currEntries.length < batch.pairs.length) {
     throw new Error('原文件与比对结果不一致（文件可能已被修改），请重新加载后再导出')
+  }
+
+  if (opts?.useWps !== false && (baseEntries.some(isXlsEntry) || currEntries.some(isXlsEntry))) {
+    if (opts?.useWps === true || (await detectWps())) {
+      try {
+        await convertXlsEntries(baseEntries, currEntries)
+      } catch {
+        // 保真转换失败就按原样走重建路径，note 会如实告知字体/居中/边框无法保留
+      }
+    }
   }
 
   let usedXls = false
@@ -200,7 +247,7 @@ export async function buildExcelZipBuffer(
   for (let i = 0; i < batch.pairs.length; i++) {
     const p = batch.pairs[i]
     const out = new ExcelJS.Workbook()
-    if (await appendPair(out, p.compare, baseBufs[i], currBufs[i])) usedXls = true
+    if (await appendPair(out, p.compare, baseEntries[i].buffer, currEntries[i].buffer)) usedXls = true
     // 导出内容统一为 xlsx（含 .xls 降级重建），扩展名必须与内容一致
     const entryName = (p.baseFileName.split('/').pop() ?? p.baseFileName).replace(/\.xls$/i, '.xlsx')
     zip.file(entryName, Buffer.from(await out.xlsx.writeBuffer()))
