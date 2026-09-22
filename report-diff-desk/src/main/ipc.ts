@@ -181,12 +181,19 @@ export function registerIpc(): void {
       target = r.filePath
     }
 
+    let note: string | undefined
     if (req.format === 'excel') {
       if (typeof req.basePath !== 'string' || typeof req.currPath !== 'string') {
         throw new Error('缺少原文件路径，无法导出')
       }
       try {
-        await writeFile(target, await buildExcelZipBuffer(req.compare, req.basePath, req.currPath))
+        const built = await buildExcelZipBuffer(req.compare, req.basePath, req.currPath)
+        await writeFile(target, built.buffer)
+        if (built.usedXls) {
+          note =
+            '源文件里有 .xls：Excel 老格式的字体、居中、边框在导出里无法保留' +
+            '（数值格式、列宽、行高、合并已尽量带上）。把源另存为 .xlsx 再上传，导出就能与原表一致。'
+        }
       } catch (err) {
         throw new Error(
           `原报表读取失败（文件可能已被移动或修改），请重新加载后再导出：${err instanceof Error ? err.message : String(err)}`
@@ -196,7 +203,7 @@ export function registerIpc(): void {
       await writeFile(target, buildHtmlReport(req.compare), 'utf-8')
     }
     shell.showItemInFolder(target)
-    return { canceled: false, path: target }
+    return { canceled: false, path: target, note }
   })
 
   ipcMain.handle(IPC.appVersion, (): string => app.getVersion())

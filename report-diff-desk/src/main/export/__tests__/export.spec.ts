@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import * as XLSX from 'xlsx'
 import JSZip from 'jszip'
 import ExcelJS from 'exceljs'
@@ -39,11 +39,12 @@ async function makeZipFile(path: string, entries: { name: string; buf: Buffer }[
 async function exportZipOf(
   basePath: string,
   currPath: string
-): Promise<{ batch: BatchCompareResult; out: Buffer }> {
+): Promise<{ batch: BatchCompareResult; out: Buffer; usedXls: boolean }> {
   const base = await loadReportFile(basePath)
   const curr = await loadReportFile(currPath)
   const batch = matchWorkbookPairs(base, curr, 0.5)
-  return { batch, out: await buildExcelZipBuffer(batch, basePath, currPath) }
+  const built = await buildExcelZipBuffer(batch, basePath, currPath)
+  return { batch, out: built.buffer, usedXls: built.usedXls }
 }
 
 /** zip 条目 → exceljs load 的形参类型（exceljs d.ts 的局部 Buffer 声明遮蔽全局 Node Buffer） */
@@ -222,5 +223,35 @@ describe('buildHtmlReport', () => {
     expect(html).toContain('1 处变动')
     expect(html).not.toMatch(/src="http/)
     expect(html).not.toMatch(/href="http/)
+  })
+})
+
+/** 真实 .xls 样例（samples/ 在 .gitignore 里，不保证每台机器都有） */
+const XLS_BASE = resolve(__dirname, '../../../../samples/上期包.zip')
+const XLS_CURR = resolve(__dirname, '../../../../samples/本期包.zip')
+const hasXlsSamples = existsSync(XLS_BASE) && existsSync(XLS_CURR)
+
+describe.skipIf(!hasXlsSamples)('buildExcelZipBuffer · .xls 源（真实样例）', () => {
+  it('数值格式等能读到的排版带得过去，usedXls 为 true', async () => {
+    const { out, usedXls } = await exportZipOf(XLS_BASE, XLS_CURR)
+    expect(usedXls).toBe(true)
+
+    const zip = await JSZip.loadAsync(out)
+    const name = Object.keys(zip.files).find((n) => /NR01/i.test(n))
+    expect(name).toBeTruthy()
+
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(await entryBuf(zip, name as string))
+    expect(wb.worksheets.map((w) => w.name).sort()).toEqual(['上期', '本期'])
+
+    // 原始 .xls 里数值格是 0.0000_（尾部带空格），丢了格式就会显示成 0.106 而不是 0.1060
+    const ws = wb.getWorksheet('本期')
+    let withFmt = 0
+    ws?.eachRow((row) =>
+      row.eachCell((cell) => {
+        if (typeof cell.value === 'number' && cell.numFmt?.trim() === '0.0000_') withFmt++
+      })
+    )
+    expect(withFmt).toBeGreaterThan(0)
   })
 })

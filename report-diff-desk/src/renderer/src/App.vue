@@ -35,6 +35,8 @@ async function exportResult(format: 'excel' | 'html'): Promise<void> {
     })
     if (!res.canceled && res.path) {
       ElMessage.success(`已导出：${res.path}`)
+      // 源里有 .xls 时 main 会带回一条说明（字体/居中/边框无法保留）
+      if (res.note) ElMessage.warning({ message: res.note, duration: 10000 })
     }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))

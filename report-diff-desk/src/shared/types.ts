@@ -158,6 +158,8 @@ export interface ExportRequest {
 export interface ExportResult {
   canceled: boolean
   path?: string
+  /** 导出后要额外告知用户的（如源为 .xls、部分格式无法保留） */
+  note?: string
 }
 
 // —— 新旧表数据比对 ——

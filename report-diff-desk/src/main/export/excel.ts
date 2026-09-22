@@ -1,12 +1,54 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { readFile } from 'fs/promises'
+import { read as readXlsx, utils as xlsxUtils } from 'xlsx'
 import type { BatchCompareResult, CellDiff, CompareResult, SheetData } from '@shared/types'
 import { parseExcel } from '../file/excel'
 
 /** 变动格紫色填充（ARGB，浅紫） */
 export const PURPLE_FILL_ARG = 'FFE6E0F8'
 const PURPLE_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PURPLE_FILL_ARG } }
+
+/**
+ * .xls（BIFF8）能带过去的排版信息。
+ * 字体、居中、边框在开源 SheetJS 社区版里读不到（`cell.s` 是 undefined），只能给到这四样。
+ */
+interface XlsLayout {
+  /** 列宽（字符数），下标对齐列号 */
+  colWidths: (number | undefined)[]
+  /** 行高（磅），下标对齐「行号 - 1」 */
+  rowHeights: (number | undefined)[]
+  /** 数值格式：`"行|列"`（0 起始）→ Excel 格式串，如 `0.0000_` */
+  formats: Map<string, string>
+}
+
+const EMPTY_LAYOUT: XlsLayout = { colWidths: [], rowHeights: [], formats: new Map() }
+
+/** 用 SheetJS 读 .xls 的排版信息（值仍走 parseExcel，保证与比对口径一致） */
+function readXlsLayout(buffer: Buffer): Map<string, XlsLayout> {
+  const wb = readXlsx(buffer, { type: 'buffer', cellNF: true })
+  const out = new Map<string, XlsLayout>()
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name]
+    const colWidths = (ws['!cols'] ?? []).map((c) => c?.wch ?? c?.width)
+    const rowHeights = (ws['!rows'] ?? []).map(
+      (r) => r?.hpt ?? (r?.hpx === undefined ? undefined : r.hpx * 0.75)
+    )
+    const formats = new Map<string, string>()
+    const ref = ws['!ref']
+    if (ref) {
+      const range = xlsxUtils.decode_range(ref)
+      for (let r = range.s.r; r <= range.e.r; r++) {
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const z = ws[xlsxUtils.encode_cell({ r, c })]?.z
+          if (typeof z === 'string' && z !== '' && z !== 'General') formats.set(`${r}|${c}`, z)
+        }
+      }
+    }
+    out.set(name, { colWidths, rowHeights, formats })
+  }
+  return out
+}
 
 /**
  * 按 zip 条目顺序（与顺序配对语义一致）读取全部 xlsx/xls 原始 buffer；
@@ -24,8 +66,9 @@ async function readSourceBuffers(path: string): Promise<Buffer[]> {
   return out
 }
 
-/** xlsx：exceljs 读取保留原样式；.xls：exceljs 不支持 biff8，降级为 SheetJS 解析值 */
-type ExportSource = { kind: 'xlsx'; wb: ExcelJS.Workbook } | { kind: 'xls'; sheets: SheetData[] }
+/** xlsx：exceljs 读取保留原样式；.xls：exceljs 不支持 biff8，降级为 SheetJS 解析值 + 能读到的排版 */
+type XlsSheet = { data: SheetData; layout: XlsLayout }
+type ExportSource = { kind: 'xlsx'; wb: ExcelJS.Workbook } | { kind: 'xls'; sheets: XlsSheet[] }
 
 async function loadSource(buffer: Buffer): Promise<ExportSource> {
   // exceljs 的 d.ts 声明了局部 Buffer 接口遮蔽全局 Node Buffer，需按形参类型断言
@@ -39,7 +82,14 @@ async function loadSource(buffer: Buffer): Promise<ExportSource> {
     // 非 xlsx 输入：降级
   }
   const parsed = parseExcel(buffer, 'legacy.xls', 'file')
-  return { kind: 'xls', sheets: parsed.sheetNames.map((n) => parsed.sheets[n]) }
+  const layouts = readXlsLayout(buffer)
+  return {
+    kind: 'xls',
+    sheets: parsed.sheetNames.map((n) => ({
+      data: parsed.sheets[n],
+      layout: layouts.get(n) ?? EMPTY_LAYOUT
+    }))
+  }
 }
 
 /** diff → 某侧需标紫的 `sheet(trim)|r|c` 集合；该侧无值的格（new 的上期侧 / removed 的本期侧）不标 */
@@ -82,14 +132,29 @@ function copyXlsxSheet(dst: ExcelJS.Workbook, src: ExcelJS.Worksheet, outName: s
   markHits((r, c) => ws.getCell(r, c), src.name, hits)
 }
 
-/** .xls 降级路径：按值+合并重建（无原字体样式）后标紫 */
-function rebuildSheet(dst: ExcelJS.Workbook, data: SheetData, outName: string, hits: Map<string, Set<string>>): void {
+/**
+ * .xls 降级路径：按值 + 合并重建，再尽量贴回列宽/行高/数值格式（字体、居中、边框读不到）后标紫。
+ * 数值格式必须带：原始 0.1060 若丢了格式会显示成 0.106。
+ */
+function rebuildSheet(dst: ExcelJS.Workbook, sheet: XlsSheet, outName: string, hits: Map<string, Set<string>>): void {
+  const { data, layout } = sheet
   const ws = dst.addWorksheet(outName)
   data.cells.forEach((row, r) => {
     row.forEach((cell, c) => {
       if (cell && cell.v !== null) ws.getCell(r + 1, c + 1).value = cell.v
     })
   })
+  layout.colWidths.forEach((w, i) => {
+    if (w) ws.getColumn(i + 1).width = w
+  })
+  layout.rowHeights.forEach((h, i) => {
+    if (h) ws.getRow(i + 1).height = h
+  })
+  for (const [rc, z] of layout.formats) {
+    const [r, c] = rc.split('|').map(Number)
+    const cell = ws.getCell(r + 1, c + 1)
+    if (cell.value !== null && cell.value !== undefined) cell.numFmt = z
+  }
   for (const m of data.merges ?? []) ws.mergeCells(m.r1 + 1, m.c1 + 1, m.r2 + 1, m.c2 + 1)
   markHits((r, c) => ws.getCell(r, c), data.name, hits)
 }
@@ -101,39 +166,42 @@ function appendSourceSheets(dst: ExcelJS.Workbook, src: ExportSource, prefix: '�
     for (const ws of src.wb.worksheets) copyXlsxSheet(dst, ws, outSheetName(prefix, ws.name, single), hits)
   } else {
     const single = src.sheets.length === 1
-    for (const data of src.sheets) rebuildSheet(dst, data, outSheetName(prefix, data.name, single), hits)
+    for (const s of src.sheets) rebuildSheet(dst, s, outSheetName(prefix, s.data.name, single), hits)
   }
 }
 
-async function appendPair(dst: ExcelJS.Workbook, compare: CompareResult, baseBuf: Buffer, currBuf: Buffer): Promise<void> {
+async function appendPair(dst: ExcelJS.Workbook, compare: CompareResult, baseBuf: Buffer, currBuf: Buffer): Promise<boolean> {
   const [baseSrc, currSrc] = await Promise.all([loadSource(baseBuf), loadSource(currBuf)])
   appendSourceSheets(dst, baseSrc, '上期', hitMap(compare.diffs, 'base'))
   appendSourceSheets(dst, currSrc, '本期', hitMap(compare.diffs, 'curr'))
+  return baseSrc.kind === 'xls' || currSrc.kind === 'xls'
 }
 
 /**
  * 批量比对 → zip 压缩包：每个文件对一个 xlsx（条目名 = 上期原文件名），
  * 内含「上期」「本期」两个 sheet（按原表格式 + 变动格紫色填充）。
+ * `usedXls` 表示源里有 .xls：那条路径拿不到字体/居中/边框，调用方据此提示用户。
  */
 export async function buildExcelZipBuffer(
   batch: BatchCompareResult,
   basePath: string,
   currPath: string
-): Promise<Buffer> {
+): Promise<{ buffer: Buffer; usedXls: boolean }> {
   const baseBufs = await readSourceBuffers(basePath)
   const currBufs = await readSourceBuffers(currPath)
   if (baseBufs.length < batch.pairs.length || currBufs.length < batch.pairs.length) {
     throw new Error('原文件与比对结果不一致（文件可能已被修改），请重新加载后再导出')
   }
 
+  let usedXls = false
   const zip = new JSZip()
   for (let i = 0; i < batch.pairs.length; i++) {
     const p = batch.pairs[i]
     const out = new ExcelJS.Workbook()
-    await appendPair(out, p.compare, baseBufs[i], currBufs[i])
+    if (await appendPair(out, p.compare, baseBufs[i], currBufs[i])) usedXls = true
     // 导出内容统一为 xlsx（含 .xls 降级重建），扩展名必须与内容一致
     const entryName = (p.baseFileName.split('/').pop() ?? p.baseFileName).replace(/\.xls$/i, '.xlsx')
     zip.file(entryName, Buffer.from(await out.xlsx.writeBuffer()))
   }
-  return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
+  return { buffer: Buffer.from(await zip.generateAsync({ type: 'nodebuffer' })), usedXls }
 }
