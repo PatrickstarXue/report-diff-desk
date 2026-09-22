@@ -6,6 +6,7 @@ import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import { useDragPan } from '../utils/dragPan'
+import { revealCellWhenReady } from '../utils/reveal'
 import { useGridZoom } from '../utils/zoom'
 import ResizeBar from './ResizeBar.vue'
 import ZoomBadge from './ZoomBadge.vue'
@@ -15,11 +16,7 @@ const session = useSessionStore()
 const side = ref<'base' | 'curr'>('curr')
 const sheetName = ref('')
 const sheetData = ref<SheetData | null>(null)
-const gridRef = ref<{
-  $el: HTMLElement
-  scrollTo: (o: { top: number }) => void
-  doLayout: () => void
-} | null>(null)
+const gridRef = ref<{ $el: HTMLElement; doLayout: () => void } | null>(null)
 const tableHeight = ref(400)
 let resizeStartH = 400
 
@@ -190,21 +187,24 @@ watch(
 
 watch(sheetName, loadSheet)
 
-// DiffList 点击跳转：切文件对 + 切 sheet + 估算滚动到目标行
+// DiffList 点击跳转：切文件对 + 切 sheet + 把目标格横向纵向都滚进视野
 watch(
   () => session.gridFocus,
-  (focus) => {
+  async (focus) => {
     if (!focus) return
-    session.activePairIndex = focus.pairIndex
     const target = focus
-    setTimeout(() => {
-      if (sheetOptions.value.includes(target.sheet) && sheetName.value !== target.sheet) {
-        sheetName.value = target.sheet
-      }
-      if (sheetName.value === target.sheet) {
-        gridRef.value?.scrollTo({ top: Math.max(0, target.row - 3) * 40 })
-      }
-    }, 100)
+    session.activePairIndex = target.pairIndex
+    // 换文件对会触发下面的 workbook watcher 把 sheet 重置成第一张，
+    // 等它跑完再切到目标 sheet，否则会被它覆盖掉
+    await nextTick()
+    if (sheetOptions.value.includes(target.sheet) && sheetName.value !== target.sheet) {
+      sheetName.value = target.sheet
+    }
+    await revealCellWhenReady(
+      () => gridRef.value?.$el,
+      'td.cell-focused',
+      () => gridRef.value?.doLayout()
+    )
   }
 )
 </script>

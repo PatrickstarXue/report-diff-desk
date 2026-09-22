@@ -6,6 +6,7 @@ import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
 import { useDragPan } from '../utils/dragPan'
+import { revealCellWhenReady } from '../utils/reveal'
 import { useGridZoom } from '../utils/zoom'
 import ResizeBar from './ResizeBar.vue'
 import ZoomBadge from './ZoomBadge.vue'
@@ -53,18 +54,7 @@ function onOverviewResize(deltaY: number): void {
 /** 本次选中是否由页内点击产生：是的话格子本就在眼前，不该再动滚动条 */
 let pickedLocally = false
 
-/**
- * 跳转定位：直接让选中格滚进视野。
- * 不用 el-table 的 scrollTo / 自己算行偏移——切标签页时表格刚从隐藏变可见，
- * 滚动容器的高度还没重新量过，按坐标算出来的落点不可靠。
- */
-function revealSelectedCell(): void {
-  gridRef.value?.$el
-    .querySelector<HTMLElement>('td.doc-cell-selected')
-    ?.scrollIntoView({ block: 'center', inline: 'nearest' })
-}
-
-// 从报表环比页跳转命中规则文档后：滚动整体区到目标行，突出显示选中格
+// 从报表环比页跳转命中规则文档后：横竖都滚到目标格并突出显示
 watch(
   () => session.selectedDocCell,
   (sel) => {
@@ -73,11 +63,11 @@ watch(
       pickedLocally = false
       return
     }
-    setTimeout(() => {
-      // 切标签页时表格刚从隐藏变可见，表体高度可能还没重新量过，先强制重排
-      gridRef.value?.doLayout()
-      revealSelectedCell()
-    }, 100)
+    void revealCellWhenReady(
+      () => gridRef.value?.$el,
+      'td.doc-cell-selected',
+      () => gridRef.value?.doLayout()
+    )
   }
 )
 
