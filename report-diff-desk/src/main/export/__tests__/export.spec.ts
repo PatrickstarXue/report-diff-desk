@@ -9,6 +9,7 @@ import type { BatchCompareResult } from '@shared/types'
 import { loadReportFile } from '../../../main/file/loader'
 import { matchWorkbookPairs } from '@shared/core/pairing'
 import { buildExcelZipBuffer, PURPLE_FILL_ARG } from '../excel'
+import { readXlsFills } from '../xls-patch'
 import { buildHtmlReport } from '../html'
 
 let tmpDir: string
@@ -39,12 +40,12 @@ async function makeZipFile(path: string, entries: { name: string; buf: Buffer }[
 async function exportZipOf(
   basePath: string,
   currPath: string
-): Promise<{ batch: BatchCompareResult; out: Buffer; usedXls: boolean }> {
+): Promise<{ batch: BatchCompareResult; out: Buffer; note?: string }> {
   const base = await loadReportFile(basePath)
   const curr = await loadReportFile(currPath)
   const batch = matchWorkbookPairs(base, curr, 0.5)
   const built = await buildExcelZipBuffer(batch, basePath, currPath)
-  return { batch, out: built.buffer, usedXls: built.usedXls }
+  return { batch, out: built.buffer, note: built.note }
 }
 
 /** zip 条目 → exceljs load 的形参类型（exceljs d.ts 的局部 Buffer 声明遮蔽全局 Node Buffer） */
@@ -144,7 +145,7 @@ describe('buildExcelZipBuffer', () => {
     expect(wb.worksheets.map((w) => w.name)).toEqual(['上期_数据', '上期_附注', '本期_数据', '本期_附注'])
   })
 
-  it('.xls 老格式：降级为值+合并重建，仍两 sheet 并标紫；条目扩展名统一为 .xlsx', async () => {
+  it('.xls 源：就地打标、保持 .xls，每对输出上期/本期两个文件，值不变', async () => {
     const makeXls = (rows: unknown[][]): Buffer => {
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), '数据')
@@ -155,15 +156,22 @@ describe('buildExcelZipBuffer', () => {
     writeFileSync(basePath, makeXls(BASE_ROWS))
     writeFileSync(currPath, makeXls(CURR_ROWS))
 
-    const { out } = await exportZipOf(basePath, currPath)
+    const { out, note } = await exportZipOf(basePath, currPath)
     const zip = await JSZip.loadAsync(out)
-    const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name)
-    expect(names).toEqual(['base.xlsx'])
-    const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(await entryBuf(zip, 'base.xlsx'))
-    expect(wb.worksheets.map((w) => w.name)).toEqual(['上期', '本期'])
-    expect(wb.worksheets[0].getCell('B3').value).toBe(100)
-    expect(fillArgOf(wb.worksheets[0].getCell('B3'))).toBe(PURPLE_FILL_ARG)
+    const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name).sort()
+    expect(names).toEqual(['base.xls', 'curr.xls'])
+    expect(note).toContain('就地打标')
+
+    // 打标后仍是合法 .xls，值原样；命中格（营收 100→200）变实心紫
+    const patched = Buffer.from(await zip.file('base.xls')!.async('uint8array'))
+    const wb = XLSX.read(patched, { type: 'buffer' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    expect(ws['B3']?.v).toBe(100)
+    expect(ws['A1']?.v).toBe('NR01 境内汇总数据')
+    const fills = readXlsFills(patched)
+    expect(fills.get(`${wb.SheetNames[0]}|2,1`)?.pattern).toBe(1) // 营收 100→200：命中，实心
+    expect(fills.get(`${wb.SheetNames[0]}|3,1`)?.pattern).toBe(1) // 费用 0→50：也是命中
+    expect(fills.get(`${wb.SheetNames[0]}|4,1`)?.pattern).not.toBe(1) // 利润未变：原样
   })
 
   it('exceljs load 不抛错但 0 sheet（真实 biff8 行为）：走降级不产出空工作簿', async () => {
@@ -232,26 +240,35 @@ const XLS_CURR = resolve(__dirname, '../../../../samples/本期包.zip')
 const hasXlsSamples = existsSync(XLS_BASE) && existsSync(XLS_CURR)
 
 describe.skipIf(!hasXlsSamples)('buildExcelZipBuffer · .xls 源（真实样例）', () => {
-  it('数值格式等能读到的排版带得过去，usedXls 为 true', async () => {
-    const { out, usedXls } = await exportZipOf(XLS_BASE, XLS_CURR)
-    expect(usedXls).toBe(true)
+  it('就地打标：输出仍是 .xls，值、数值格式、未命中的格全不变', async () => {
+    const { out, note } = await exportZipOf(XLS_BASE, XLS_CURR)
+    expect(note).toContain('就地打标')
 
     const zip = await JSZip.loadAsync(out)
-    const name = Object.keys(zip.files).find((n) => /NR01/i.test(n))
-    expect(name).toBeTruthy()
+    const names = Object.keys(zip.files)
+    // 每对输出上期、本期两个 .xls，文件名保持原样
+    expect(names.filter((n) => /\.xls$/i.test(n)).length).toBe(4)
+    expect(names.some((n) => /\.xlsx$/i.test(n))).toBe(false)
 
-    const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(await entryBuf(zip, name as string))
-    expect(wb.worksheets.map((w) => w.name).sort()).toEqual(['上期', '本期'])
+    const baseName = names.find((n) => /NR01/i.test(n) && /2607/i.test(n))
+    const currName = names.find((n) => /NR01/i.test(n) && /2608/i.test(n))
+    expect(baseName && currName).toBeTruthy()
 
-    // 原始 .xls 里数值格是 0.0000_（尾部带空格），丢了格式就会显示成 0.106 而不是 0.1060
-    const ws = wb.getWorksheet('本期')
+    const patched = Buffer.from(await zip.file(currName as string)!.async('uint8array'))
+    const wb = XLSX.read(patched, { type: 'buffer', cellNF: true })
+    const ws = wb.Sheets[wb.SheetNames[0]]
     let withFmt = 0
-    ws?.eachRow((row) =>
-      row.eachCell((cell) => {
-        if (typeof cell.value === 'number' && cell.numFmt?.trim() === '0.0000_') withFmt++
-      })
-    )
-    expect(withFmt).toBeGreaterThan(0)
+    let numeric = 0
+    const range = XLSX.utils.decode_range(ws['!ref'] as string)
+    for (let r = range.s.r; r <= range.e.r; r++)
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })]
+        if (typeof cell?.v === 'number') {
+          numeric++
+          if (typeof cell.z === 'string' && cell.z.trim() === '0.0000_') withFmt++
+        }
+      }
+    expect(numeric).toBeGreaterThan(100)
+    expect(withFmt).toBeGreaterThan(100) // 就地打标不改值不改格式
   })
 })
