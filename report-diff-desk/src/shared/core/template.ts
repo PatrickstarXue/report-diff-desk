@@ -81,7 +81,7 @@ export function splitRuleValue(v: string): { row: string; col: string } {
   return i < 0 ? { row: v, col: '' } : { row: v.slice(0, i), col: v.slice(i + 1) }
 }
 
-/** 默认锚点词：报表标签区左上角那一格的文本 */
+/** 默认锚点词：报表标签区里那格合并格的文本（常见「项目」；其合并范围要盖到标签区右下角） */
 export const DEFAULT_ANCHORS = ['项目']
 
 /** 比较用：去掉全部空白，避免「项 目」这类排版空格导致漏匹配 */

@@ -102,7 +102,7 @@ const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.e
 /** 锚点未识别、已按行列位置降级解析：种子是「第N行_列字母」，需人工在规则表里对齐 */
 const degradedHint = computed(() =>
   pair.value?.left?.degraded || pair.value?.right?.degraded
-    ? `该表对有一侧没能识别到锚点词「${session.effectiveAnchors.join('、')}」——若这份报表的标签区右下角用的是别的词（如「机构类别」），把它加到上方「锚点词」里再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
+    ? `该表对有一侧没能识别到锚点词「${session.effectiveAnchors.join('、')}」——若这份报表的标签区最右那列表头用的是别的词（如「机构类别」），把它加到上方「锚点词」里再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
     : ''
 )
 
@@ -251,7 +251,7 @@ function onSideChange(v: string | number | boolean | undefined): void {
         @change="onAnchorChange"
       />
       <span class="hint anchor-hint">
-        锚点 = 报表标签区<strong>右下角</strong>那一格的文字（如「项目」「机构类别」）。可加多个，每份报表各取自己命中的那个；一个都没命中就按行列位置降级解析，到「对比规则」页人工对齐。
+        锚点词 = 表格<strong>标签区最右那一列表头</strong>的文字（常见「项目」，有的报表是「机构类别」）。工具拿这格所在的<strong>合并范围</strong>划标签区：最右那列及左边算标签列、下一列起算数据列，所以这格要盖到标签区的右下角。可加多个，每份报表各取自己命中的那个；都没命中就按行列位置降级解析，到「对比规则」页人工对齐。
       </span>
     </div>
 
@@ -331,7 +331,7 @@ function onSideChange(v: string | number | boolean | undefined): void {
         >
           <template #default>
             同一个规则值在一侧出现多次时，该值整体不参与比对。若某个标签维度被挤掉了（比如同一期限下几家机构算成了同一个值），
-            说明锚点左边的标签列取少了——引擎把锚点右边那一列当成了数据列。请把上方「锚点词」改成该报表标签区<b>右下角</b>那一格的文字，再点「开始核对」。
+            说明锚点左边的标签列取少了——引擎把锚点右边那一列当成了数据列（锚点格的合并范围没盖到最后一个标签列）。请把上方「锚点词」改成该报表<b>标签区最右那一列表头</b>的文字，再点「开始核对」。
             <div v-if="anchorPos" class="anchor-pos">{{ anchorPos }}</div>
           </template>
         </el-alert>
