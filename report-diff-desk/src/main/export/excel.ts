@@ -140,6 +140,25 @@ function outSheetName(prefix: '上期' | '本期', name: string, singleSheetFile
   return singleSheetFile ? prefix : `${prefix}_${name}`.slice(0, 31)
 }
 
+/**
+ * 导出条目名 = 上期原文件名第一个下划线之前的部分（`NR01_2510_全辖_20260731.xls` → `NR01.xlsx`）。
+ * 报表名里带的期次、口径、日期都是每次上传都变的，留在文件名里只会让同一个表在不同批次
+ * 导出成不同的名字。
+ *
+ * 截断后若与已有条目重名（同一 zip 里出现两个同前缀文件），加序号——JSZip 同名会静默覆盖，
+ * 那是导出结果直接丢文件。
+ */
+function uniqueEntryName(baseFileName: string, used: Set<string>): string {
+  const base = baseFileName.split('/').pop() ?? baseFileName
+  const noExt = base.replace(/\.[^.]+$/, '')
+  const stem = noExt.split('_')[0] || noExt
+  let name = `${stem}.xlsx`
+  let n = 2
+  while (used.has(name)) name = `${stem}_${n++}.xlsx`
+  used.add(name)
+  return name
+}
+
 /** 给命中格填充紫色 */
 function markHits(cellAt: (r: number, c: number) => ExcelJS.Cell, sheetName: string, hits: Map<string, Set<string>>): void {
   const set = hits.get(sheetName.trim())
@@ -243,14 +262,14 @@ export async function buildExcelZipBuffer(
   }
 
   let usedXls = false
+  const usedNames = new Set<string>()
   const zip = new JSZip()
   for (let i = 0; i < batch.pairs.length; i++) {
     const p = batch.pairs[i]
     const out = new ExcelJS.Workbook()
     if (await appendPair(out, p.compare, baseEntries[i].buffer, currEntries[i].buffer)) usedXls = true
     // 导出内容统一为 xlsx（含 .xls 降级重建），扩展名必须与内容一致
-    const entryName = (p.baseFileName.split('/').pop() ?? p.baseFileName).replace(/\.xls$/i, '.xlsx')
-    zip.file(entryName, Buffer.from(await out.xlsx.writeBuffer()))
+    zip.file(uniqueEntryName(p.baseFileName, usedNames), Buffer.from(await out.xlsx.writeBuffer()))
   }
   return {
     buffer: Buffer.from(await zip.generateAsync({ type: 'nodebuffer' })),

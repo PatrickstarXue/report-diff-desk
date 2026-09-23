@@ -72,25 +72,26 @@ describe('buildExcelZipBuffer', () => {
     const baseZip = join(tmpDir, 'base.zip')
     const currZip = join(tmpDir, 'curr.zip')
     await makeZipFile(baseZip, [
-      { name: 'NR01_月_20260731.xlsx', buf: makeXlsxBuf(BASE_ROWS, MERGE) },
-      { name: 'NR02_月_20260731.xlsx', buf: makeXlsxBuf([['指标', '金额'], ['存量', 1000]]) }
+      { name: 'NR01_2510_全辖_20260731.xlsx', buf: makeXlsxBuf(BASE_ROWS, MERGE) },
+      { name: 'NR02_2510_全辖_20260731.xlsx', buf: makeXlsxBuf([['指标', '金额'], ['存量', 1000]]) }
     ])
     await makeZipFile(currZip, [
-      { name: 'NR01_1910_月_20260831.xlsx', buf: makeXlsxBuf(CURR_ROWS, MERGE) },
-      { name: 'NR02_1910_月_20260831.xlsx', buf: makeXlsxBuf([['指标', '金额'], ['存量', 1000]]) }
+      { name: 'NR01_2510_全辖_20260831.xlsx', buf: makeXlsxBuf(CURR_ROWS, MERGE) },
+      { name: 'NR02_2510_全辖_20260831.xlsx', buf: makeXlsxBuf([['指标', '金额'], ['存量', 1000]]) }
     ])
 
     const { batch, out } = await exportZipOf(baseZip, currZip)
     expect(batch.totalDiffs).toBe(2)
 
-    // zip 内条目名 = 上期原文件名（去掉 zip 前缀），每对一个条目
+    // 条目名只保留第一个下划线之前的部分——期次/口径/日期每批都变，带进去会让同一张表
+    // 在不同批次导出成不同名字
     const zip = await JSZip.loadAsync(out)
     const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name)
-    expect(names).toEqual(['NR01_月_20260731.xlsx', 'NR02_月_20260731.xlsx'])
+    expect(names).toEqual(['NR01.xlsx', 'NR02.xlsx'])
 
     // 回读第一个条目：两个 sheet + 紫色 + 合并保留
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(await entryBuf(zip, 'NR01_月_20260731.xlsx'))
+    await wb.xlsx.load(await entryBuf(zip, 'NR01.xlsx'))
     expect(wb.worksheets.map((w) => w.name)).toEqual(['上期', '本期'])
 
     const baseWs = wb.worksheets[0]
@@ -151,6 +152,36 @@ describe('buildExcelZipBuffer', () => {
     expect(fillArgOf(ws.getCell('B4'))).toBe(PURPLE_FILL_ARG)
     expect(fillArgOf(ws.getCell('B2'))).toBeUndefined()
     expect(fillArgOf(ws.getCell('B3'))).toBeUndefined()
+  })
+
+  it('截断后重名时加序号，不静默覆盖', async () => {
+    // 同一份包里有两条同前缀文件：截断后都叫 NR01.xlsx，JSZip 同名会直接覆盖掉一个
+    const baseZip = join(tmpDir, 'dup-base.zip')
+    const currZip = join(tmpDir, 'dup-curr.zip')
+    await makeZipFile(baseZip, [
+      { name: 'NR01_2510_全辖_20260731.xlsx', buf: makeXlsxBuf(BASE_ROWS, MERGE) },
+      { name: 'NR01_2511_全辖_20260731.xlsx', buf: makeXlsxBuf([['指标', '金额'], ['存量', 1000]]) }
+    ])
+    await makeZipFile(currZip, [
+      { name: 'NR01_2510_全辖_20260831.xlsx', buf: makeXlsxBuf(CURR_ROWS, MERGE) },
+      { name: 'NR01_2511_全辖_20260831.xlsx', buf: makeXlsxBuf([['指标', '金额'], ['存量', 1000]]) }
+    ])
+
+    const { out } = await exportZipOf(baseZip, currZip)
+    const zip = await JSZip.loadAsync(out)
+    const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name)
+    expect(names).toEqual(['NR01.xlsx', 'NR01_2.xlsx'])
+  })
+
+  it('没有下划线的文件名保持原样', async () => {
+    const basePath = join(tmpDir, 'plain.xlsx')
+    const currPath = join(tmpDir, 'plain-curr.xlsx')
+    writeFileSync(basePath, makeXlsxBuf(BASE_ROWS, MERGE))
+    writeFileSync(currPath, makeXlsxBuf(CURR_ROWS, MERGE))
+
+    const { out } = await exportZipOf(basePath, currPath)
+    const zip = await JSZip.loadAsync(out)
+    expect(Object.keys(zip.files)).toEqual(['plain.xlsx'])
   })
 
   it('单文件 xlsx 输入同样可导出（非 zip 路径）', async () => {
@@ -340,7 +371,9 @@ describe.skipIf(!hasWps)('buildExcelZipBuffer · .xls 源 WPS 保真转换（真
     // 取第一对有实际差异的文件对，坐标由真实结果推导，不写死
     const idx = batch.pairs.findIndex((p) => p.compare.diffs.length > 0)
     expect(idx).toBeGreaterThanOrEqual(0)
-    const entry = (batch.pairs[idx].baseFileName.split('/').pop() ?? '').replace(/\.xls$/i, '.xlsx')
+    // 条目名 = 上期原文件名第一个下划线之前的部分，与 main 侧 uniqueEntryName 同一规则
+    const base = (batch.pairs[idx].baseFileName.split('/').pop() ?? '').replace(/\.[^.]+$/, '')
+    const entry = `${base.split('_')[0]}.xlsx`
 
     const zip = await JSZip.loadAsync(out)
     expect(Object.keys(zip.files)).toContain(entry)
