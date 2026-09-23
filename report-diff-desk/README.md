@@ -14,7 +14,7 @@ npm run make:samples # 生成演示样例（samples/ 目录）
 npm run build:win    # 打包：安装版 + 便携版（dist/ 目录）
 ```
 
-便携版 `dist/报表比对工具-Portable-2.2.0.exe` 双击即用，免安装、无需 Node 环境。
+便携版 `dist/报表比对工具-Portable-2.2.1.exe` 双击即用，免安装、无需 Node 环境。
 
 ## 功能
 
