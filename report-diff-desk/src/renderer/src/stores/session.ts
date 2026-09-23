@@ -26,7 +26,7 @@ interface SessionState {
   loading: boolean
   mappingIndex: MappingIndex | null
   mappingCount: number
-  /** 点选单元格（文本/位置），驱动口径查询 */
+  /** 点选单元格（文本/位置），驱动 Mapping口径 */
   selectedCell: { text: string; sheet: string; ref: string; row: number; col: number } | null
   /** DiffList 点击行 → 网格跳转目标（含列，用于紫色标记聚焦格） */
   gridFocus: { pairIndex: number; sheet: string; row: number; col: number } | null
@@ -38,15 +38,15 @@ interface SessionState {
   activeDocSheet: string
   /** 点击整体区单元格选中的内容（报表文档） */
   selectedDocCell: { sheet: string; row: number; col: number; value: string } | null
-  /** 右侧标签页：result | grid | mapping | doc */
+  /** 左侧菜单当前项：welcome | result | grid | template | mapping | doc */
   uiTab: string
-  /** 新旧表数据比对：左侧（R 系列）与右侧（NR 系列）报表 */
+  /** 新旧表比对：左侧（R 系列）与右侧（NR 系列）报表 */
   templateLeft: WorkbookData[]
   templateRight: WorkbookData[]
   templateLeftPath: string
   templateRightPath: string
   templateResult: TemplateCheckResult | null
-  /** 新旧表数据比对的相对差阈值（小数，0.0001 = 0.01%） */
+  /** 新旧表比对的相对差阈值（小数，0.0001 = 0.01%） */
   templateThreshold: number
   /**
    * 锚点词列表（界面里是一排可删的标签）。
@@ -85,7 +85,7 @@ export const useSessionStore = defineStore('session', {
     activeDocIndex: 0,
     activeDocSheet: '',
     selectedDocCell: null,
-    uiTab: 'grid',
+    uiTab: 'welcome',
     templateLeft: [],
     templateRight: [],
     templateLeftPath: '',
@@ -197,7 +197,7 @@ export const useSessionStore = defineStore('session', {
       this.mappingCount = this.mappingIndex.size
     },
 
-    /** 点选网格单元格：记录坐标，点到点规则匹配（前缀精准匹配规则文档 sheet），切到口径查询页 */
+    /** 点选网格单元格：记录坐标，点到点规则匹配（前缀精准匹配规则文档 sheet），切到 Mapping口径 页 */
     selectCell(text: string, sheet: string, ref: string, row: number, col: number, reportFileName: string): void {
       this.selectedCell = { text, sheet, ref, row, col }
 
@@ -226,7 +226,7 @@ export const useSessionStore = defineStore('session', {
         }
       }
 
-      // 未匹配：清空局部详情，仍切到口径查询页
+      // 未匹配：清空局部详情，仍切到 Mapping口径 页
       this.selectedDocCell = null
       this.uiTab = 'mapping'
     },
@@ -300,7 +300,7 @@ export const useSessionStore = defineStore('session', {
       this.gridFocus = null
     },
 
-    /** 加载新旧表数据比对某一侧的 zip */
+    /** 加载新旧表比对某一侧的 zip */
     async loadTemplateSide(side: 'left' | 'right', path: string): Promise<void> {
       this.loading = true
       try {

@@ -162,7 +162,7 @@ export interface ExportResult {
   note?: string
 }
 
-// —— 新旧表数据比对 ——
+// —— 新旧表比对 ——
 
 /** 单元格矩形范围（0 起始，含端点）；仅供锚点合并区裁剪使用 */
 export interface CellRange {

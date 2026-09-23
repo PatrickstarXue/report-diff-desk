@@ -54,7 +54,7 @@ function onOverviewResize(deltaY: number): void {
 /** 本次选中是否由页内点击产生：是的话格子本就在眼前，不该再动滚动条 */
 let pickedLocally = false
 
-// 从报表环比页跳转命中规则文档后：横竖都滚到目标格并突出显示
+// 从高亮显示页跳转命中规则文档后：横竖都滚到目标格并突出显示
 watch(
   () => session.selectedDocCell,
   (sel) => {

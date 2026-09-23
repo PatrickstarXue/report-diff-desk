@@ -8,6 +8,7 @@ import { useSessionStore } from '../stores/session'
 import { useDragPan } from '../utils/dragPan'
 import { revealCellWhenReady } from '../utils/reveal'
 import { useGridZoom } from '../utils/zoom'
+import ExportResultButton from './ExportResultButton.vue'
 import ResizeBar from './ResizeBar.vue'
 import ZoomBadge from './ZoomBadge.vue'
 
@@ -231,6 +232,7 @@ watch(
         <el-option v-for="s in sheetOptions" :key="s" :label="s" :value="s" />
       </el-select>
       <span class="grid-hint">粉色高亮 = 变动 &gt; 阈值；紫色 = 由比对结果点击跳转对应单元格（1对1）；右键单元格查看口径/复制数值；左键拖拽平移；Ctrl+滚轮缩放</span>
+      <ExportResultButton format="excel" class="grid-export" />
     </div>
     <el-table
       v-if="sheetData"
@@ -302,6 +304,11 @@ watch(
 .grid-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  min-width: 0;
+}
+.grid-export {
+  margin-left: auto;
+  flex: none;
 }
 .grid-placeholder {
   font-size: 12px;

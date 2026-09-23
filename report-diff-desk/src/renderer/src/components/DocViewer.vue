@@ -6,7 +6,7 @@ import PdfViewer from './PdfViewer.vue'
 
 const session = useSessionStore()
 
-/** PDF 文档列表（仅 kind=pdf，口径查询页管理 xlsx/xls） */
+/** PDF 文档列表（仅 kind=pdf，Mapping口径 页管理 xlsx/xls） */
 const pdfDocs = computed(() =>
   session.docList.map((d, i) => ({ i, d })).filter(({ d }) => d.kind === 'pdf')
 )
@@ -18,7 +18,7 @@ const doc = computed(() => {
   return session.docList[activePdfIndex.value] ?? null
 })
 
-// 同步当前 PDF 到文档库 activeDocIndex（不影响口径查询页）
+// 同步当前 PDF 到文档库 activeDocIndex（不影响 Mapping口径 页）
 watch(
   () => session.activeDocIndex,
   (idx) => {

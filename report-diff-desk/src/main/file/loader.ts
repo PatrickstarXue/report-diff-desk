@@ -39,6 +39,6 @@ export async function loadDocFile(path: string): Promise<DocContent> {
     }
   }
   throw new Error(
-    `暂不支持的口径文档格式：${ext || '(无扩展名)'}（仅支持 PDF；Word/TXT 请转 PDF；报表请在口径查询页打开）`
+    `暂不支持的口径文档格式：${ext || '(无扩展名)'}（仅支持 PDF；Word/TXT 请转 PDF；报表请在「Mapping口径」页打开）`
   )
 }

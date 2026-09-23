@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { CellDiff, DiffKind } from '@shared/types'
 import { KIND_LABEL } from '@shared/core/engine'
 import { useSessionStore } from '../stores/session'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, paginate } from '../utils/pagination'
 
 const props = defineProps<{ pairFilter?: number | null }>()
 const emit = defineEmits<{ 'update:pairFilter': [val: number | null] }>()
@@ -80,6 +81,30 @@ const rows = computed<DiffRow[]>(() => {
 
 function onSortChange({ prop, order }: { prop: string; order: SortOrder }): void {
   sortState.value = { prop, order }
+  page.value = 1 // 换排序后原页码没有意义
+}
+
+// —— 分页：先排序再切片（rows 已是排好序的），切完再排只会排到当前页 ——
+const page = ref(1)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
+const paged = computed(() => paginate(rows.value, page.value, pageSize.value))
+
+// 换筛选后条数变化，原页码多半越界
+watch(
+  () => props.pairFilter,
+  () => {
+    page.value = 1
+  }
+)
+
+/** 当前生效的筛选（用于工具栏提示；筛选态下表格会隐藏「文件」列，没有提示会让人以为数据丢了） */
+const filterLabel = computed(() => {
+  const i = pairFilter.value
+  return i === null ? '' : (session.compareResult?.pairs[i]?.pairLabel ?? '')
+})
+
+function clearFilter(): void {
+  pairFilter.value = null
 }
 
 function rateText(d: CellDiff): string {
@@ -103,45 +128,63 @@ function onRowClick(row: DiffRow): void {
 <template>
   <div class="diff-list">
     <div class="diff-toolbar">
-      <span v-if="session.compareResult" class="diff-count">共 {{ session.compareResult.totalDiffs }} 处变动</span>
+      <!-- 计数用筛选后的条数，跟分页器的 total 保持一致；用全局总数会和分页器打架 -->
+      <span class="diff-count">共 {{ rows.length }} 处变动</span>
+      <span v-if="filterLabel" class="diff-filter">
+        当前筛选：{{ filterLabel }}
+        <el-button link type="primary" size="small" @click="clearFilter">清除</el-button>
+      </span>
     </div>
-    <el-table
-      :data="rows"
-      size="small"
-      height="100%"
-      :row-class-name="rowClass"
-      :sort-orders="['descending', 'ascending', null]"
-      border
-      @sort-change="onSortChange"
-      @row-click="onRowClick"
-    >
-      <el-table-column
-        v-if="showFileCol"
-        prop="pairLabel"
-        label="文件"
-        width="220"
-        show-overflow-tooltip
-        sortable="custom"
-      />
-      <el-table-column prop="sheet" label="工作表" width="130" show-overflow-tooltip sortable="custom">
-        <template #default="{ row }">{{ row.diff.sheet }}</template>
-      </el-table-column>
-      <el-table-column prop="ref" label="坐标" width="80" sortable="custom">
-        <template #default="{ row }">{{ row.diff.ref }}</template>
-      </el-table-column>
-      <el-table-column prop="prevValue" label="上期值" min-width="110" sortable="custom">
-        <template #default="{ row }">{{ valueText(row.diff.prevValue) }}</template>
-      </el-table-column>
-      <el-table-column prop="currValue" label="本期值" min-width="110" sortable="custom">
-        <template #default="{ row }">{{ valueText(row.diff.currValue) }}</template>
-      </el-table-column>
-      <el-table-column prop="changeRate" label="变动率" width="100" align="right" sortable="custom">
-        <template #default="{ row }">{{ rateText(row.diff) }}</template>
-      </el-table-column>
-      <el-table-column prop="kind" label="类型" width="100" sortable="custom">
-        <template #default="{ row }">{{ KIND_LABEL[row.diff.kind as DiffKind] }}</template>
-      </el-table-column>
-    </el-table>
+    <!-- 不要给这层 overflow：外层套滚动容器会让 el-table 表体的横向滚动失效 -->
+    <div class="detail-table">
+      <el-table
+        :data="paged.slice"
+        size="small"
+        height="100%"
+        :row-class-name="rowClass"
+        :sort-orders="['descending', 'ascending', null]"
+        border
+        @sort-change="onSortChange"
+        @row-click="onRowClick"
+      >
+        <el-table-column
+          v-if="showFileCol"
+          prop="pairLabel"
+          label="文件"
+          width="220"
+          show-overflow-tooltip
+          sortable="custom"
+        />
+        <el-table-column prop="sheet" label="工作表" width="130" show-overflow-tooltip sortable="custom">
+          <template #default="{ row }">{{ row.diff.sheet }}</template>
+        </el-table-column>
+        <el-table-column prop="ref" label="坐标" width="80" sortable="custom">
+          <template #default="{ row }">{{ row.diff.ref }}</template>
+        </el-table-column>
+        <el-table-column prop="prevValue" label="上期值" min-width="110" sortable="custom">
+          <template #default="{ row }">{{ valueText(row.diff.prevValue) }}</template>
+        </el-table-column>
+        <el-table-column prop="currValue" label="本期值" min-width="110" sortable="custom">
+          <template #default="{ row }">{{ valueText(row.diff.currValue) }}</template>
+        </el-table-column>
+        <el-table-column prop="changeRate" label="变动率" width="100" align="right" sortable="custom">
+          <template #default="{ row }">{{ rateText(row.diff) }}</template>
+        </el-table-column>
+        <el-table-column prop="kind" label="类型" width="100" sortable="custom">
+          <template #default="{ row }">{{ KIND_LABEL[row.diff.kind as DiffKind] }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <el-pagination
+      class="diff-pager"
+      layout="total, sizes, prev, pager, next, jumper"
+      :page-sizes="PAGE_SIZE_OPTIONS"
+      :current-page="paged.page"
+      :page-size="pageSize"
+      :total="paged.total"
+      @current-change="(p: number) => (page = p)"
+      @size-change="(s: number) => { pageSize = s; page = 1 }"
+    />
   </div>
 </template>
 
@@ -154,11 +197,25 @@ function onRowClick(row: DiffRow): void {
 .diff-toolbar {
   display: flex;
   align-items: center;
+  gap: 12px;
   padding: 8px 0;
 }
 .diff-count {
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+.diff-filter {
+  font-size: 13px;
+  color: var(--el-color-primary);
+}
+/* min-height:0 必须——否则表格的 auto 最小尺寸会把分页器顶出可视区 */
+.detail-table {
+  flex: 1;
+  min-height: 0;
+}
+.diff-pager {
+  padding-top: 8px;
+  justify-content: flex-end;
 }
 </style>
 
