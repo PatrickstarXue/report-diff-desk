@@ -9,7 +9,7 @@
 ```bash
 npm install
 npm run dev          # 开发模式
-npm test             # 单元测试（51 个）
+npm test             # 单元测试
 npm run make:samples # 生成演示样例（samples/ 目录）
 npm run build:win    # 打包：安装版 + 便携版（dist/ 目录）
 ```
