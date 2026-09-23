@@ -18,9 +18,9 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 
 三进程 Electron 应用：main（IO/解析/IPC/导出）、preload（contextBridge 唯一 window.api）、renderer（Vue3 + Element Plus）。所有数据 JSON 序列化通过 IPC。
 
-- **`src/shared/`**：纯逻辑，零 Node/Electron 依赖，vitest 直接测试（node 环境）。核心在 `core/`（engine.ts 环比比对引擎、numeric.ts 数值解析、mapping.ts 口径映射、pairing.ts 顺序配对、merge.ts 合并单元格 span 矩阵、summary.ts 概览汇总、template.ts 新旧表数据比对（规则表配对）、sheet-view.ts 网格渲染纯函数）
+- **`src/shared/`**：纯逻辑，零 Node/Electron 依赖，vitest 直接测试（node 环境）。核心在 `core/`（engine.ts 环比比对引擎、numeric.ts 数值解析、mapping.ts 口径映射、pairing.ts 顺序配对、merge.ts 合并单元格 span 矩阵、summary.ts 概览汇总、template.ts 新旧表比对（规则表配对）、sheet-view.ts 网格渲染纯函数）
 - **`src/main/`**：main 进程。`file/`（excel.ts/zip.ts/docx.ts/pdf.ts/txt.ts/loader.ts 分格式解析）、`export/`（excel.ts zip 导出、html.ts 明细导出、wps.ts 借本机 WPS/Excel 的 COM 把 .xls 转 .xlsx）、`ipc.ts`（全部 ipcMain.handle + 入参校验）、`store.ts`（工作簿会话缓存）、`align.ts`（规则表持久化）
-- **`src/renderer/src/`**：renderer 进程。`stores/session.ts`（Pinia 全局状态：比对/网格焦点/文档库/规则表草稿）、`components/`（FilePanel/SheetGrid/DiffList/MappingPanel/DocViewer/PdfViewer/OverviewPanel/ResizeBar/TemplatePanel/TemplateGrid/RulePanel/RuleTable/ZoomBadge）、`utils/`（dragPan 左键拖拽平移、zoom Ctrl+滚轮缩放、reveal 跳转定位）、`App.vue`（布局 + 版本信息；标签页：报表环比 / 环比结果概览 / 口径查询 / 口径文档 / 新旧表数据比对）
+- **`src/renderer/src/`**：renderer 进程。`stores/session.ts`（Pinia 全局状态：比对/网格焦点/文档库/规则表草稿）、`components/`（WelcomePanel 落地首页/FilePanel/SheetGrid/DiffList/ExportResultButton/MappingPanel/DocViewer/PdfViewer/ResultPanel/OverviewPanel/ResizeBar/TemplatePanel/TemplateGrid/RulePanel/RuleTable/ZoomBadge）、`utils/`（dragPan 左键拖拽平移、zoom Ctrl+滚轮缩放、reveal 跳转定位、pagination 明细分页）、`App.vue`（布局 + 版本信息；左侧菜单 = 首页 + 分组「报表环比」（整体概览/高亮显示）+ 分组「口径查询」（Mapping口径/官方文档）+ 独立项「新旧表比对」居末；报表选择条由首页与「报表环比」两个子页共用）
 - **`src/shared/ipc.ts`**：IPC channel 名常量，main/preload/renderer 三端共用
 - **`src/shared/api.ts`**：window.api 契约接口，preload 逐 channel 包装 ipcRenderer.invoke
 
@@ -30,6 +30,7 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 - **exceljs 4.4**：仅用于**写入**导出 xlsx（SheetJS CE 写 fill 样式会丢失）
 - **pdfjs-dist 4.10**：main 端提取 PDF 文本 + renderer 端 canvas 渲染 PDF（pdf.worker.min.mjs 通过 vite `?worker` 打包）
 - **jszip 3.10**：内存 zip 解压（GBK 文件名 fallback：检测 U+FFFD → TextDecoder('gbk')）
+- **@element-plus/icons-vue 2.3**：左侧菜单与首页卡片的图标，仅在 renderer 用，放 devDependencies（renderer 依赖由 electron-vite 内联进 bundle）。**未在 main.ts 全局注册**，按需 import；用在 `el-menu` 里时必须包 `<el-icon>`，否则裸 svg 拿不到菜单的样式钩子
 
 ## 环境注意事项
 
@@ -40,7 +41,7 @@ npm run make:samples     # 生成演示样例（samples/ 目录）
 
 ## 测试
 
-vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export + renderer store/utils），共 164 个用例（162 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）；`src/main/file/__tests__/template-samples.spec.ts` 用 samples/similarSample/ 的真实 xls 走生产解析链路，样例缺失时整组跳过。
+vitest 覆盖纯逻辑（src/shared + src/main/file + src/main/export + renderer store/utils），共 176 个用例（174 passed + 2 skipped）。测试 fixture 在运行时由 SheetJS/JSZip 生成（不放二进制文件到仓库）。samples/ 目录在 .gitignore 里（用户文件，不提交）；`src/main/file/__tests__/template-samples.spec.ts` 用 samples/similarSample/ 的真实 xls 走生产解析链路，样例缺失时整组跳过。
 
 `src/main/export/__tests__/export.spec.ts` 里断言 .xls **降级**行为的用例一律显式传 `{ useWps: false }`——否则在装了 WPS 的机器上会走保真转换、note 断言静默失效。真实样例组按 `existsSync(samples/...)`、WPS 保真组再叠一层顶层 `await detectWps()` 做 `describe.skipIf` 门禁，所以用例总数随机器而变。
 
