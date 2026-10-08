@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useSessionStore } from '../session'
+import { DEFAULT_TEMPLATE_COLORS } from '../../utils/templateColors'
 import type {
   AlignConfig,
   TemplateCellRef,
@@ -44,7 +45,9 @@ const pairResult = (tableNo: string, leftKey: string, rightKey: string): Templat
   duplicateRules: [],
   onlyInLeft: [],
   onlyInRight: [],
-  totalCompared: 1
+  totalCompared: 1,
+  comparedLeft: [],
+  comparedRight: []
 })
 
 let storedConfig: AlignConfig
@@ -267,7 +270,7 @@ describe('锚点词', () => {
     expect(lastRequest.anchors).toEqual(['项目', '机构类别'])
   })
 
-  it('reloadAlignConfig 回填列表（盘上没有就用默认）；saveAnchors 写盘且不动已有规则表', async () => {
+  it('reloadAlignConfig 回填列表（盘上没有就用默认）；saveTemplateSettings 写盘且不动已有规则表', async () => {
     storedConfig = {
       version: 2,
       ruleTables: { 'R06|NR06': { left: { '5,3': '甲_乙' }, right: {} } },
@@ -277,10 +280,49 @@ describe('锚点词', () => {
     await s.reloadAlignConfig()
     expect(s.anchors).toEqual(['机构类别'])
     s.anchors = ['项目', '机构类别']
-    await s.saveAnchors()
+    await s.saveTemplateSettings()
     expect(setCalls).toHaveLength(1)
     expect(setCalls[0].anchors).toEqual(['项目', '机构类别'])
     expect(setCalls[0].ruleTables['R06|NR06'].left['5,3']).toBe('甲_乙')
+  })
+
+  it('标记配色：盘上有就回填，没有就用默认；保存锚点时不被抹掉', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: {},
+      anchors: ['项目'],
+      colors: { diff: '#111111', compared: '#eeeeee' }
+    }
+    const s = useSessionStore()
+    await s.reloadAlignConfig()
+    expect(s.templateColors).toEqual({ diff: '#111111', compared: '#eeeeee' })
+
+    s.anchors = ['机构类别']
+    await s.saveTemplateSettings()
+    expect(setCalls[0].colors).toEqual({ diff: '#111111', compared: '#eeeeee' })
+    expect(setCalls[0].anchors).toEqual(['机构类别'])
+  })
+
+  it('盘上没配色时用默认值，且保存锚点会把它写进配置', async () => {
+    const s = useSessionStore()
+    await s.reloadAlignConfig()
+    expect(s.templateColors).toEqual(DEFAULT_TEMPLATE_COLORS)
+    await s.saveTemplateSettings()
+    expect(setCalls[0].colors).toEqual(DEFAULT_TEMPLATE_COLORS)
+  })
+
+  it('templateComparedSet 按当前侧取「参与比对」的格', async () => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    stubPairs[0].comparedLeft = [{ row: 1, col: 2 }]
+    stubPairs[0].comparedRight = [{ row: 3, col: 4 }]
+    await s.runTemplateCheck()
+
+    s.templateSide = 'left'
+    expect(s.templateComparedSet).toEqual(new Set(['1,2']))
+    s.templateSide = 'right'
+    expect(s.templateComparedSet).toEqual(new Set(['3,4']))
   })
 
   it('保存规则表时不丢锚点词', async () => {

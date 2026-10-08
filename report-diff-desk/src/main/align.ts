@@ -8,6 +8,11 @@ function alignPath(): string {
   return join(app.getPath('userData'), 'template-align.json')
 }
 
+/** 配色值是否可用：非空字符串即可（具体格式由渲染层解析，解析不了会兜底） */
+function isColor(v: unknown): v is string {
+  return typeof v === 'string' && v.trim() !== ''
+}
+
 /**
  * 读取规则表配置。
  * - 文件不存在（ENOENT）→ 返回空配置（首次运行，正常）
@@ -35,9 +40,13 @@ export async function loadAlignConfig(): Promise<AlignConfig> {
     const anchors: string[] = Array.isArray(raw.anchors)
       ? raw.anchors.filter((s: unknown): s is string => typeof s === 'string' && s.trim() !== '')
       : []
-    return anchors.length > 0
-      ? { version: 2, ruleTables: tables, anchors }
-      : { version: 2, ruleTables: tables }
+    // colors 同为可选字段。读回时是重建对象，必须显式回填，否则落盘再读就丢了
+    const cfg: AlignConfig = { version: 2, ruleTables: tables }
+    if (anchors.length > 0) cfg.anchors = anchors
+    const diff = raw?.colors?.diff
+    const compared = raw?.colors?.compared
+    if (isColor(diff) && isColor(compared)) cfg.colors = { diff, compared }
+    return cfg
   } catch {
     throw new Error('人工规则配置解析失败：文件内容不是合法 JSON')
   }

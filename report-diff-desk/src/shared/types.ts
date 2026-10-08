@@ -258,6 +258,15 @@ export interface TemplatePairResult {
   /** 规则值只在右侧出现 */
   onlyInRight: TemplateRuleEntry[]
   totalCompared: number
+  /** 参与比对的格（两侧规则值一致、非重复、实际比过）；供网格标色 */
+  comparedLeft: TemplateCellPos[]
+  comparedRight: TemplateCellPos[]
+}
+
+/** 单元格坐标（0 起始） */
+export interface TemplateCellPos {
+  row: number
+  col: number
 }
 
 export interface TemplateCheckResult {
@@ -276,6 +285,8 @@ export interface AlignConfig {
   ruleTables: Record<string, RuleTablePair>
   /** 锚点词候选，按序尝试；缺席时用默认「项目」 */
   anchors?: string[]
+  /** 网格标记配色；缺席（或值非法）时用渲染层默认值 */
+  colors?: { diff: string; compared: string }
 }
 
 /** 手动指定的表对关系（表号提不出或冲突时用），仅本次生效 */

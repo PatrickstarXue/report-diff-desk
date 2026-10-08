@@ -444,7 +444,9 @@ export function checkTemplates(
     duplicateRules: [],
     onlyInLeft: [],
     onlyInRight: [],
-    totalCompared: 0
+    totalCompared: 0,
+    comparedLeft: [],
+    comparedRight: []
   }
   if (left.error || right.error) return res
 
@@ -471,6 +473,8 @@ export function checkTemplates(
     const r = ri.get(rule)
     if (r) {
       res.totalCompared++
+      res.comparedLeft.push({ row: cs[0].row, col: cs[0].col })
+      res.comparedRight.push({ row: r[0].row, col: r[0].col })
       collect(res.diffs, cs[0], r[0], rule, opts.threshold)
     } else {
       res.onlyInLeft.push({ cell: cs[0], rule })

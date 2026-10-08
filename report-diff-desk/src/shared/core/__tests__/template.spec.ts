@@ -533,6 +533,53 @@ describe('checkTemplates', () => {
     const res = check(l, bad)
     expect(res.diffs).toHaveLength(0)
     expect(res.totalCompared).toBe(0)
+    expect(res.comparedLeft).toEqual([])
+    expect(res.comparedRight).toEqual([])
+  })
+
+  it('配对成功的格按各自表的坐标进 comparedLeft/Right，没超阈值的也算', () => {
+    const l = tsheet('R06', [
+      [5, 3, '甲', '乙', 1.2],
+      [6, 3, '甲', '丙', 7]
+    ])
+    const r = tsheet('NR06', [
+      [9, 3, '甲', '乙', 1],
+      [10, 3, '甲', '丙', 7]
+    ])
+    const res = check(l, r)
+    expect(res.totalCompared).toBe(2)
+    expect(res.diffs.map((d) => d.rule)).toEqual(['甲_乙'])
+    expect(res.comparedLeft).toEqual([
+      { row: 5, col: 3 },
+      { row: 6, col: 3 }
+    ])
+    expect(res.comparedRight).toEqual([
+      { row: 9, col: 3 },
+      { row: 10, col: 3 }
+    ])
+  })
+
+  it('单侧有值的格也算参与比对', () => {
+    const l = tsheet('R06', [[5, 3, '甲', '乙', 1]])
+    const r = tsheet('NR06', [[5, 3, '甲', '乙', null]])
+    const res = check(l, r)
+    expect(res.totalCompared).toBe(1)
+    expect(res.comparedLeft).toEqual([{ row: 5, col: 3 }])
+    expect(res.comparedRight).toEqual([{ row: 5, col: 3 }])
+  })
+
+  it('未配上与规则值重复的格都不进 compared*', () => {
+    const l = tsheet('R06', [
+      [5, 3, '甲', '乙', 1],
+      [6, 3, '丙', '丁', 2]
+    ])
+    const r = tsheet('NR06', [[7, 3, '戊', '己', 3]])
+    const res = check(l, r)
+    expect(res.totalCompared).toBe(0)
+    expect(res.onlyInLeft).toHaveLength(2)
+    expect(res.onlyInRight).toHaveLength(1)
+    expect(res.comparedLeft).toEqual([])
+    expect(res.comparedRight).toEqual([])
   })
 })
 

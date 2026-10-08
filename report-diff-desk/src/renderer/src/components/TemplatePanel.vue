@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, type WritableComputedRef } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { TemplateDiff, TemplateSheet } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
 import { colLetter } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
+import { DEFAULT_TEMPLATE_COLORS } from '../utils/templateColors'
 import TemplateGrid from './TemplateGrid.vue'
 import RulePanel from './RulePanel.vue'
 
@@ -12,6 +13,27 @@ const session = useSessionStore()
 
 /** 阈值输入用百分数（0.01 = 0.01%），与现有环比比对一致 */
 const thresholdPct = ref(0.01)
+
+/** 标记配色：清空时 el-color-picker 会 emit 空值，兜回默认色，避免网格背景失效 */
+function colorProxy(key: 'diff' | 'compared'): WritableComputedRef<string> {
+  return computed({
+    get: () => session.templateColors[key],
+    set: (v) => {
+      session.templateColors[key] = v || DEFAULT_TEMPLATE_COLORS[key]
+    }
+  })
+}
+const diffColor = colorProxy('diff')
+const comparedColor = colorProxy('compared')
+
+/** 改色只重绘，不重新核对 */
+async function onColorsChange(): Promise<void> {
+  try {
+    await session.saveTemplateSettings()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
 
 /** 子标签页：比对结果 | 对比规则 */
 const subTab = ref('result')
@@ -118,10 +140,10 @@ const anchorPos = computed(() => {
   return `锚点命中位置：${at(p.left, '左侧')}，${at(p.right, '右侧')}`
 })
 
-/** 锚点词改动落盘（失焦 / 回车触发）；配置没读进来时 saveAnchors 静默跳过 */
+/** 锚点词改动落盘（失焦 / 回车触发）；配置没读进来时 saveTemplateSettings 静默跳过 */
 async function onAnchorChange(): Promise<void> {
   try {
-    await session.saveAnchors()
+    await session.saveTemplateSettings()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }
@@ -228,6 +250,21 @@ function onSideChange(v: string | number | boolean | undefined): void {
         :step="0.01"
         :precision="4"
         size="small"
+      />
+      <span class="hint">标记颜色</span>
+      <span class="hint">超阈值</span>
+      <el-color-picker
+        v-model="diffColor"
+        size="small"
+        :clearable="false"
+        @change="onColorsChange"
+      />
+      <span class="hint">参与比对</span>
+      <el-color-picker
+        v-model="comparedColor"
+        size="small"
+        :clearable="false"
+        @change="onColorsChange"
       />
       <el-button
         class="run-check"

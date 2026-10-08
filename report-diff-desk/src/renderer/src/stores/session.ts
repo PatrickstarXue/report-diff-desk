@@ -14,6 +14,7 @@ import type {
 } from '@shared/types'
 import { buildIndex, type MappingIndex } from '@shared/core/mapping'
 import { DEFAULT_ANCHORS, templateKeyOf } from '@shared/core/template'
+import { DEFAULT_TEMPLATE_COLORS } from '../utils/templateColors'
 
 interface SessionState {
   baseWorkbooks: WorkbookData[]
@@ -62,6 +63,8 @@ interface SessionState {
   /** 人工指定的表对（表号冲突时用），仅本次生效 */
   manualTablePairs: TemplateTablePair[]
   alignConfig: AlignConfig | null
+  /** 网格标记配色（超阈值 / 参与比对），与锚点词同一份配置 */
+  templateColors: { diff: string; compared: string }
   /** 规则表草稿，键 `左表样键|右表样键`；与已保存配置合并后参与核对（草稿优先） */
   ruleDrafts: Record<string, RuleTablePair>
   /** 草稿有未保存修改 */
@@ -98,6 +101,7 @@ export const useSessionStore = defineStore('session', {
     templateFocus: null,
     manualTablePairs: [],
     alignConfig: null,
+    templateColors: { ...DEFAULT_TEMPLATE_COLORS },
     ruleDrafts: {},
     ruleDirty: false
   }),
@@ -128,6 +132,15 @@ export const useSessionStore = defineStore('session', {
           s.templateSide === 'left' ? `${d.leftRow},${d.leftCol}` : `${d.rightRow},${d.rightCol}`
         )
       }
+      return set
+    },
+    /** 当前表对中，落在当前侧「参与比对」的格集合（"row,col"，0 起始） */
+    templateComparedSet: (s): Set<string> => {
+      const p = s.templateResult?.pairs[s.templatePairIndex]
+      const set = new Set<string>()
+      if (!p) return set
+      const list = s.templateSide === 'left' ? p.comparedLeft : p.comparedRight
+      for (const c of list) set.add(`${c.row},${c.col}`)
       return set
     },
     /** 当前表对的配置键 `左表样键|右表样键`；无表对时为空串 */
@@ -362,18 +375,39 @@ export const useSessionStore = defineStore('session', {
     async reloadAlignConfig(): Promise<void> {
       this.alignConfig = await window.api.getAlignConfig()
       this.anchors = this.alignConfig.anchors?.length ? [...this.alignConfig.anchors] : [...DEFAULT_ANCHORS]
+      this.templateColors = { ...DEFAULT_TEMPLATE_COLORS, ...this.alignConfig.colors }
     },
 
-    /** 保存锚点词到配置（与规则表同一份文件）。配置没读进来时不写，避免覆盖盘上内容 */
-    async saveAnchors(): Promise<void> {
+    /**
+     * 以已读入的配置为基准组装要落盘的对象：三个字段各自可覆盖，未覆盖的沿用现值。
+     * 每个保存入口各写一遍字面量的话，漏写字段就会在下一次保存时被静默抹掉。
+     * 配置没读进来时返回 null，调用方放弃保存，避免用空基准覆盖盘上内容。
+     */
+    buildAlignConfig(over?: {
+      ruleTables?: Record<string, RuleTablePair>
+      anchors?: string[]
+      colors?: { diff: string; compared: string }
+    }): AlignConfig | null {
       const base = this.alignConfig
-      if (!base) return
-      const cfg: AlignConfig = {
-        version: 2,
-        // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
-        ruleTables: JSON.parse(JSON.stringify(base.ruleTables)) as Record<string, RuleTablePair>,
-        anchors: [...this.effectiveAnchors]
-      }
+      if (!base) return null
+      // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
+      return JSON.parse(
+        JSON.stringify({
+          version: 2,
+          ruleTables: over?.ruleTables ?? base.ruleTables,
+          anchors: over?.anchors ?? this.effectiveAnchors,
+          colors: over?.colors ?? this.templateColors
+        })
+      ) as AlignConfig
+    },
+
+    /**
+     * 保存锚点词与标记配色（与规则表同一份文件）。配置没读进来时不写，避免覆盖盘上内容。
+     * 纯客户端设置，不触发重新核对。
+     */
+    async saveTemplateSettings(): Promise<void> {
+      const cfg = this.buildAlignConfig()
+      if (!cfg) return
       await window.api.setAlignConfig(cfg)
       this.alignConfig = cfg
     },
@@ -437,16 +471,10 @@ export const useSessionStore = defineStore('session', {
       const key = this.activeRuleKey
       const draft = this.ruleDrafts[key]
       if (!draft) return
-      const base = this.alignConfig
-      if (!base) throw new Error('配置未就绪，已放弃保存以避免覆盖已有规则')
-      const cfg: AlignConfig = {
-        version: 2,
-        // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
-        ruleTables: JSON.parse(
-          JSON.stringify({ ...base.ruleTables, [key]: draft })
-        ) as Record<string, RuleTablePair>,
-        anchors: [...this.effectiveAnchors]
-      }
+      const cfg = this.buildAlignConfig({
+        ruleTables: { ...(this.alignConfig?.ruleTables ?? {}), [key]: draft }
+      })
+      if (!cfg) throw new Error('配置未就绪，已放弃保存以避免覆盖已有规则')
       await window.api.setAlignConfig(cfg)
       this.alignConfig = cfg
       this.ruleDirty = false

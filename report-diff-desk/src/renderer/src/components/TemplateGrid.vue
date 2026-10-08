@@ -5,6 +5,7 @@ import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useDragPan } from '../utils/dragPan'
 import { useGridZoom } from '../utils/zoom'
+import { readableTextOn } from '../utils/templateColors'
 import ZoomBadge from './ZoomBadge.vue'
 
 const session = useSessionStore()
@@ -54,12 +55,26 @@ function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: n
   const classes: string[] = []
   const s = spans.value?.[rowIndex]?.[c]
   if (s && s.rowspan > 0) classes.push('merge-master')
+  const pos = `${rowIndex},${c}`
+  // 参与比对是底色，被后两类标记叠在上面
+  if (session.templateComparedSet.has(pos)) classes.push('compared')
   // 差异跳转聚焦格：紫色标记（优先于命中标记）
   const f = session.templateFocus
   if (f && f.row === rowIndex && f.col === c) classes.push('cell-focused')
-  if (session.templateHitSet.has(`${rowIndex},${c}`)) classes.push('diff-hit')
+  if (session.templateHitSet.has(pos)) classes.push('diff-hit')
   return classes.join(' ')
 }
+
+/** 标记配色交给用户，以 CSS 变量下发；文字色按背景明度自动取可读色 */
+const markerVars = computed(() => {
+  const { diff, compared } = session.templateColors
+  return {
+    '--tpl-diff-bg': diff,
+    '--tpl-diff-fg': readableTextOn(diff),
+    '--tpl-cmp-bg': compared,
+    '--tpl-cmp-fg': readableTextOn(compared)
+  }
+})
 
 // —— 左键拖拽平移（Ctrl+左键保留原生文本选择），与 SheetGrid 一致 ——
 
@@ -86,7 +101,7 @@ watch(
 </script>
 
 <template>
-  <div class="template-grid" @wheel="onZoomWheel">
+  <div class="template-grid" :style="markerVars" @wheel="onZoomWheel">
     <el-table
       v-if="sheetData"
       ref="gridRef"
@@ -134,11 +149,16 @@ watch(
   color: #909399;
   font-weight: 400;
 }
-/* 顺序有意：cell-focused 在后，同时命中时紫压粉（与 SheetGrid 一致） */
+/* 顺序有意：底色最前，cell-focused 在后，同时命中时紫压粉（与 SheetGrid 一致）。
+   !important 不能省：el-table 的 hover 行规则特异性高于这三条。 */
+.template-grid .el-table .compared {
+  background: var(--tpl-cmp-bg, #fff3cd) !important;
+  color: var(--tpl-cmp-fg, #1f2937);
+}
 .template-grid .el-table .diff-hit {
-  background: #ffd6e8 !important;
+  background: var(--tpl-diff-bg, #ffd6e8) !important;
   font-weight: 600;
-  color: #d6336c;
+  color: var(--tpl-diff-fg, #1f2937);
 }
 .template-grid .el-table .cell-focused {
   background: #e6d0f5 !important;
