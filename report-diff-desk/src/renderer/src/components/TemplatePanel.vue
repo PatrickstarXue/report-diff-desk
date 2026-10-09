@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, type WritableComputedRef } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { TemplateDiff, TemplateSheet } from '@shared/types'
+import type { HeaderRange, TemplateDiff, TemplateSheet } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
 import { colLetter } from '@shared/core/sheet-view'
 import { useSessionStore } from '../stores/session'
@@ -124,7 +124,7 @@ const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.e
 /** 锚点未识别、已按行列位置降级解析：种子是「第N行_列字母」，需人工在规则表里对齐 */
 const degradedHint = computed(() =>
   pair.value?.left?.degraded || pair.value?.right?.degraded
-    ? `该表对有一侧没能识别到锚点词「${session.effectiveAnchors.join('、')}」——若这份报表的标签区最右那列表头用的是别的词（如「机构类别」），把它加到上方「锚点词」里再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
+    ? `该表对有一侧没能识别到锚点词「${session.effectiveAnchors.join('、')}」——可用网格上方「设置表头范围」直接框选表头块；或把该报表标签区最右那列表头用的词（如「机构类别」）加到上方「锚点词」里再核对一次；否则已按行列位置降级解析（规则值形如「第6行_D」），到「对比规则」页人工对齐。`
     : ''
 )
 
@@ -222,100 +222,150 @@ function onDiffCurrentChange(row: { diff: TemplateDiff; pairIndex: number } | nu
 function onPairIndexChange(v: number): void {
   session.templatePairIndex = v
   session.templateFocus = null
+  pickMode.value = false
 }
 
 function onSideChange(v: string | number | boolean | undefined): void {
   if (v !== 'left' && v !== 'right') return
   session.templateSide = v
   session.templateFocus = null
+  pickMode.value = false
+}
+
+// —— 表头范围（作用于当前侧） ——
+
+const pickMode = ref(false)
+const pickedRange = ref<HeaderRange | null>(null)
+
+const activeSheet = computed(() =>
+  session.templateSide === 'left' ? pair.value?.left : pair.value?.right
+)
+const savedHeaderRange = computed(() => session.activeHeaderRange)
+const headerSourceLabel = computed(() => {
+  const s = activeSheet.value?.headerSource
+  return s === 'manual' ? '已手动设置' : s === 'auto' ? '自动识别' : s === 'degraded' ? '未识别（降级）' : '—'
+})
+const headerSourceType = computed(() => {
+  const s = activeSheet.value?.headerSource
+  return s === 'manual' ? 'success' : s === 'degraded' ? 'warning' : 'info'
+})
+
+/** 进入框选：有存档用存档，否则预填当前自动解析出的范围 */
+function openPick(): void {
+  pickedRange.value = savedHeaderRange.value ?? activeSheet.value?.headerRange ?? null
+  pickMode.value = true
+}
+function cancelPick(): void {
+  pickMode.value = false
+}
+function onSelectRange(r: HeaderRange): void {
+  pickedRange.value = r
+}
+async function applyRange(): Promise<void> {
+  if (!pickedRange.value) return
+  try {
+    await session.saveHeaderRange({ ...pickedRange.value })
+    pickMode.value = false
+    ElMessage.success('表头范围已保存')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
+async function resetRange(): Promise<void> {
+  try {
+    await session.saveHeaderRange(null)
+    pickMode.value = false
+    ElMessage.success('已恢复为自动识别')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
 }
 </script>
 
 <template>
   <div class="template-panel">
-    <div class="panel-toolbar">
-      <el-button size="small" type="primary" plain @click="openSide('left')">
-        左侧报表（R 系列）
-      </el-button>
-      <span class="file-label">{{ templateKeyOf(session.templateLeftPath) || '未选择' }}</span>
-      <el-button size="small" type="primary" plain @click="openSide('right')">
-        右侧报表（NR 系列）
-      </el-button>
-      <span class="file-label">{{ templateKeyOf(session.templateRightPath) || '未选择' }}</span>
-      <span class="hint">相对差阈值（%）</span>
-      <el-input-number
-        v-model="thresholdPct"
-        :min="0"
-        :max="100"
-        :step="0.01"
-        :precision="4"
-        size="small"
-      />
-      <span class="hint">标记颜色</span>
-      <span class="hint">超阈值</span>
-      <el-color-picker
-        v-model="diffColor"
-        size="small"
-        :clearable="false"
-        @change="onColorsChange"
-      />
-      <span class="hint">参与比对</span>
-      <el-color-picker
-        v-model="comparedColor"
-        size="small"
-        :clearable="false"
-        @change="onColorsChange"
-      />
-      <el-button
-        class="run-check"
-        size="small"
-        type="primary"
-        :loading="session.loading"
-        :disabled="!session.templateLeft.length || !session.templateRight.length"
-        @click="runCheck"
-      >
-        开始核对
-      </el-button>
-    </div>
+    <!-- 顶部工具条整块吸顶：面板内容另有一层滚动，滚动时这些操作保持可见 -->
+    <div class="template-head">
+      <div class="panel-toolbar">
+        <el-button size="small" type="primary" plain @click="openSide('left')">
+          左侧报表（R 系列）
+        </el-button>
+        <span class="file-label">{{ templateKeyOf(session.templateLeftPath) || '未选择' }}</span>
+        <el-button size="small" type="primary" plain @click="openSide('right')">
+          右侧报表（NR 系列）
+        </el-button>
+        <span class="file-label">{{ templateKeyOf(session.templateRightPath) || '未选择' }}</span>
+        <span class="hint">相对差阈值（%）</span>
+        <el-input-number
+          v-model="thresholdPct"
+          :min="0"
+          :max="100"
+          :step="0.01"
+          :precision="4"
+          size="small"
+        />
+        <span class="hint">标记颜色</span>
+        <span class="hint">超阈值</span>
+        <el-color-picker
+          v-model="diffColor"
+          size="small"
+          :clearable="false"
+          @change="onColorsChange"
+        />
+        <span class="hint">参与比对</span>
+        <el-color-picker
+          v-model="comparedColor"
+          size="small"
+          :clearable="false"
+          @change="onColorsChange"
+        />
+        <el-button
+          class="run-check"
+          size="small"
+          type="primary"
+          :loading="session.loading"
+          :disabled="!session.templateLeft.length || !session.templateRight.length"
+          @click="runCheck"
+        >
+          开始核对
+        </el-button>
+      </div>
 
-    <div class="panel-toolbar">
-      <span class="hint">锚点词</span>
-      <el-input-tag
-        v-model="session.anchors"
-        size="small"
-        class="anchor-input"
-        placeholder="项目"
-        @change="onAnchorChange"
-      />
-      <span class="hint anchor-hint">
-        锚点词 = 表格<strong>标签区最右那一列表头</strong>的文字（常见「项目」，有的报表是「机构类别」）。工具拿这格所在的<strong>合并范围</strong>划标签区：最右那列及左边算标签列、下一列起算数据列，所以这格要盖到标签区的右下角。可加多个，每份报表各取自己命中的那个；都没命中就按行列位置降级解析，到「对比规则」页人工对齐。
-      </span>
-    </div>
+      <div class="panel-toolbar">
+        <span class="hint">锚点词</span>
+        <el-input-tag
+          v-model="session.anchors"
+          size="small"
+          class="anchor-input"
+          placeholder="项目"
+          @change="onAnchorChange"
+        />
+        <span class="hint anchor-hint">
+          锚点词 = 表格<strong>标签区最右那一列表头</strong>的文字（常见「项目」，有的报表是「机构类别」）。工具以这格所在<strong>合并范围</strong>定标签列右界，并向上扩展到表头块顶行；锚点词都没命中时按行列位置降级解析，此时可用网格上方「设置表头范围」直接框选表头块。
+        </span>
+      </div>
 
-    <div v-if="result" class="panel-toolbar">
-      <span class="hint">表对</span>
-      <el-select
-        :model-value="session.templatePairIndex"
-        size="small"
-        class="pair-select"
-        @update:model-value="onPairIndexChange"
-      >
-        <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
-      </el-select>
-      <el-radio-group
-        :model-value="session.templateSide"
-        size="small"
-        @update:model-value="onSideChange"
-      >
-        <el-radio-button value="left">左侧</el-radio-button>
-        <el-radio-button value="right">右侧</el-radio-button>
-      </el-radio-group>
-      <span v-if="pairError" class="err-hint">{{ pairError }}</span>
-    </div>
-
-    <el-tabs v-model="subTab" class="template-subtabs">
-      <el-tab-pane label="比对结果" name="result">
-        <div v-if="result" class="panel-toolbar">
+      <div v-if="result" class="panel-toolbar">
+        <span class="hint">表对</span>
+        <el-select
+          :model-value="session.templatePairIndex"
+          size="small"
+          class="pair-select"
+          @update:model-value="onPairIndexChange"
+        >
+          <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
+        </el-select>
+        <el-radio-group
+          :model-value="session.templateSide"
+          size="small"
+          @update:model-value="onSideChange"
+        >
+          <el-radio-button value="left">左侧</el-radio-button>
+          <el-radio-button value="right">右侧</el-radio-button>
+        </el-radio-group>
+        <span v-if="pairError" class="err-hint">{{ pairError }}</span>
+        <!-- 未配对指定表对：与「表对」同一行，靠右 -->
+        <span class="pair-unmatched">
           <span class="hint">未配对：</span>
           <el-select v-model="manualLeftId" size="small" class="mini-select" placeholder="左侧文件">
             <el-option
@@ -336,118 +386,152 @@ function onSideChange(v: string | number | boolean | undefined): void {
           <el-button size="small" :disabled="!manualLeftId || !manualRightId" @click="addManualPair">
             指定为表对
           </el-button>
-        </div>
+        </span>
+      </div>
 
-        <el-alert
-          v-if="noAutoPairHint"
-          type="warning"
-          show-icon
-          :closable="false"
-          title="本表对没有任何单元格配对成功"
-        >
-          <template #default>
-            两侧的规则值没有任何一对是相同的（通常是某几行缺少父级标签）。
-            请切到「对比规则」页，把要比较的两侧规则值改成一致；配一次整行即可生效。
-          </template>
-        </el-alert>
+      <!-- 视图切换跟着顶部一起吸顶，内容滚动时不受影响 -->
+      <div class="panel-toolbar">
+        <span class="hint">视图</span>
+        <el-radio-group v-model="subTab" size="small">
+          <el-radio-button value="result">比对结果</el-radio-button>
+          <el-radio-button value="rules">对比规则</el-radio-button>
+        </el-radio-group>
+      </div>
+    </div>
 
-        <el-alert
-          v-if="degradedHint"
-          type="info"
-          show-icon
-          :closable="false"
-          :title="degradedHint"
-        />
+    <div v-show="subTab === 'result'">
+      <el-alert
+        v-if="noAutoPairHint"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="本表对没有任何单元格配对成功"
+      >
+        <template #default>
+          两侧的规则值没有任何一对是相同的（通常是某几行缺少父级标签）。
+          请切到「对比规则」页，把要比较的两侧规则值改成一致；配一次整行即可生效。
+        </template>
+      </el-alert>
 
-        <el-alert
-          v-if="dupRows.length"
-          type="warning"
-          show-icon
-          :closable="false"
-          :title="`规则值重复 ${dupRows.length} 项，可能是锚点没落在最后一个标签列`"
-        >
-          <template #default>
-            同一个规则值在一侧出现多次时，该值整体不参与比对。若某个标签维度被挤掉了（比如同一期限下几家机构算成了同一个值），
-            说明锚点左边的标签列取少了——引擎把锚点右边那一列当成了数据列（锚点格的合并范围没盖到最后一个标签列）。请把上方「锚点词」改成该报表<b>标签区最右那一列表头</b>的文字，再点「开始核对」。
-            <div v-if="anchorPos" class="anchor-pos">{{ anchorPos }}</div>
-          </template>
-        </el-alert>
+      <el-alert
+        v-if="degradedHint"
+        type="info"
+        show-icon
+        :closable="false"
+        :title="degradedHint"
+      />
 
-        <el-collapse v-if="result" v-model="openPanels" class="only-collapse">
-          <el-collapse-item :title="`差异（共 ${result.totalDiffs} 处）`" name="diffs">
-            <el-table
-              :data="diffRows"
-              size="small"
-              border
-              height="220"
-              highlight-current-row
-              @current-change="onDiffCurrentChange"
-            >
-              <el-table-column label="表号" prop="tableNo" width="70" />
-              <el-table-column
-                label="规则值"
-                prop="diff.rule"
-                min-width="360"
-                show-overflow-tooltip
-              />
-              <el-table-column label="左值" prop="diff.leftText" width="110" show-overflow-tooltip />
-              <el-table-column
-                label="右值"
-                prop="diff.rightText"
-                width="110"
-                show-overflow-tooltip
-              />
-              <el-table-column label="相对差" width="100">
-                <template #default="{ row }">
-                  {{ row.diff.relDiff === null ? '—' : (row.diff.relDiff * 100).toFixed(4) + '%' }}
-                </template>
-              </el-table-column>
-              <el-table-column label="类型" width="110">
-                <template #default="{ row }">
-                  <el-tag v-if="row.diff.kind === 'diff'" type="danger" size="small">差额</el-tag>
-                  <el-tag v-else type="warning" size="small">单侧有值</el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-collapse-item>
-        </el-collapse>
+      <el-alert
+        v-if="dupRows.length"
+        type="warning"
+        show-icon
+        :closable="false"
+        :title="`规则值重复 ${dupRows.length} 项，可能是锚点没落在最后一个标签列`"
+      >
+        <template #default>
+          同一个规则值在一侧出现多次时，该值整体不参与比对。若某个标签维度被挤掉了（比如同一期限下几家机构算成了同一个值），
+          说明锚点左边的标签列取少了——引擎把锚点右边那一列当成了数据列（锚点格的合并范围没盖到最后一个标签列）。请把上方「锚点词」改成该报表<b>标签区最右那一列表头</b>的文字，再点「开始核对」。
+          <div v-if="anchorPos" class="anchor-pos">{{ anchorPos }}</div>
+        </template>
+      </el-alert>
 
-        <TemplateGrid v-if="result" />
+      <el-collapse v-if="result" v-model="openPanels" class="only-collapse">
+        <el-collapse-item :title="`差异（共 ${result.totalDiffs} 处）`" name="diffs">
+          <el-table
+            :data="diffRows"
+            size="small"
+            border
+            height="220"
+            highlight-current-row
+            @current-change="onDiffCurrentChange"
+          >
+            <el-table-column label="表号" prop="tableNo" width="70" />
+            <el-table-column
+              label="规则值"
+              prop="diff.rule"
+              min-width="360"
+              show-overflow-tooltip
+            />
+            <el-table-column label="左值" prop="diff.leftText" width="110" show-overflow-tooltip />
+            <el-table-column
+              label="右值"
+              prop="diff.rightText"
+              width="110"
+              show-overflow-tooltip
+            />
+            <el-table-column label="相对差" width="100">
+              <template #default="{ row }">
+                {{ row.diff.relDiff === null ? '—' : (row.diff.relDiff * 100).toFixed(4) + '%' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="类型" width="110">
+              <template #default="{ row }">
+                <el-tag v-if="row.diff.kind === 'diff'" type="danger" size="small">差额</el-tag>
+                <el-tag v-else type="warning" size="small">单侧有值</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+      </el-collapse>
 
-        <el-collapse v-if="result && dupRows.length" class="only-collapse">
-          <el-collapse-item :title="`规则值重复（${dupRows.length} 项，不参与比对）`" name="dup">
-            <div class="only-hint">
-              同一个规则值在一侧出现多次时该值整体不参与比对，请把它们改成各自唯一的值。
-            </div>
-            <el-table :data="dupRows" size="small" border max-height="200">
-              <el-table-column label="表号" prop="tableNo" width="70" />
-              <el-table-column label="侧" prop="side" width="50" />
-              <el-table-column label="规则值" prop="rule" min-width="320" show-overflow-tooltip />
-              <el-table-column label="出现次数" prop="count" width="90" />
-            </el-table>
-          </el-collapse-item>
-        </el-collapse>
+      <div v-if="result" class="panel-toolbar">
+        <span class="hint">表头范围（当前侧）</span>
+        <el-tag size="small" :type="headerSourceType">{{ headerSourceLabel }}</el-tag>
+        <template v-if="!pickMode">
+          <el-button size="small" @click="openPick">设置表头范围</el-button>
+          <el-button v-if="savedHeaderRange" size="small" plain @click="resetRange">
+            重置为自动
+          </el-button>
+        </template>
+        <template v-else>
+          <span class="hint">在网格上拖拽框选表头块（行头列 + 表头行），松手即预览</span>
+          <el-button size="small" type="primary" :disabled="!pickedRange" @click="applyRange">
+            应用
+          </el-button>
+          <el-button size="small" plain @click="cancelPick">取消</el-button>
+        </template>
+      </div>
 
-        <el-collapse v-if="result && onlyRows.length" class="only-collapse">
-          <el-collapse-item :title="`未配上（${onlyRows.length} 项）`" name="only">
-            <div class="only-hint">
-              两侧规则值一致才会比对。请到「对比规则」页把它们改成一致；不想比对就把该格清空。
-            </div>
-            <el-table :data="onlyRows" size="small" border max-height="260">
-              <el-table-column label="表号" prop="tableNo" width="70" />
-              <el-table-column label="侧" prop="side" width="50" />
-              <el-table-column label="规则值" prop="rule" min-width="320" show-overflow-tooltip />
-            </el-table>
-          </el-collapse-item>
-        </el-collapse>
+      <TemplateGrid
+        v-if="result"
+        :selecting="pickMode"
+        :prefill="pickedRange"
+        @select-range="onSelectRange"
+      />
 
-        <el-empty v-if="!result" description="选择两套报表（zip）后点击「开始核对」" />
-      </el-tab-pane>
+      <el-collapse v-if="result && dupRows.length" class="only-collapse">
+        <el-collapse-item :title="`规则值重复（${dupRows.length} 项，不参与比对）`" name="dup">
+          <div class="only-hint">
+            同一个规则值在一侧出现多次时该值整体不参与比对，请把它们改成各自唯一的值。
+          </div>
+          <el-table :data="dupRows" size="small" border max-height="200">
+            <el-table-column label="表号" prop="tableNo" width="70" />
+            <el-table-column label="侧" prop="side" width="50" />
+            <el-table-column label="规则值" prop="rule" min-width="320" show-overflow-tooltip />
+            <el-table-column label="出现次数" prop="count" width="90" />
+          </el-table>
+        </el-collapse-item>
+      </el-collapse>
 
-      <el-tab-pane label="对比规则" name="rules">
-        <RulePanel />
-      </el-tab-pane>
-    </el-tabs>
+      <el-collapse v-if="result && onlyRows.length" class="only-collapse">
+        <el-collapse-item :title="`未配上（${onlyRows.length} 项）`" name="only">
+          <div class="only-hint">
+            两侧规则值一致才会比对。请到「对比规则」页把它们改成一致；不想比对就把该格清空。
+          </div>
+          <el-table :data="onlyRows" size="small" border max-height="260">
+            <el-table-column label="表号" prop="tableNo" width="70" />
+            <el-table-column label="侧" prop="side" width="50" />
+            <el-table-column label="规则值" prop="rule" min-width="320" show-overflow-tooltip />
+          </el-table>
+        </el-collapse-item>
+      </el-collapse>
+
+      <el-empty v-if="!result" description="选择两套报表（zip）后点击「开始核对」" />
+    </div>
+
+    <div v-show="subTab === 'rules'">
+      <RulePanel />
+    </div>
   </div>
 </template>
 
@@ -459,6 +543,18 @@ function onSideChange(v: string | number | boolean | undefined): void {
   height: 100%;
   overflow: auto;
   padding: 4px;
+}
+/* 整块顶部工具条吸顶：面板自身是滚动容器，内容滚动时这些操作保持可见。
+   必须给不透明背景，否则滚到底下会被内容透出。 */
+.template-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+  background: var(--el-bg-color, #fff);
 }
 .panel-toolbar {
   display: flex;
@@ -477,6 +573,13 @@ function onSideChange(v: string | number | boolean | undefined): void {
 }
 .pair-select {
   width: 340px;
+}
+/* 未配对指定表对：贴住「表对」那一行的右端 */
+.pair-unmatched {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
 .mini-select {
   width: 200px;

@@ -4,6 +4,7 @@ import type {
   BatchCompareResult,
   DocContent,
   FilePairResult,
+  HeaderRange,
   RuleTable,
   RuleTablePair,
   TemplateCheckResult,
@@ -148,6 +149,17 @@ export const useSessionStore = defineStore('session', {
       const p = s.templateResult?.pairs[s.templatePairIndex]
       if (!p) return ''
       return `${templateKeyOf(p.leftFile)}|${templateKeyOf(p.rightFile)}`
+    },
+    /** 当前侧的表样键（表头范围按它存档）；无表对时为空串 */
+    activeTemplateKey: (s): string => {
+      const p = s.templateResult?.pairs[s.templatePairIndex]
+      if (!p) return ''
+      return templateKeyOf(s.templateSide === 'left' ? p.leftFile : p.rightFile)
+    },
+    /** 当前侧已存档的表头范围；无存档时为 null */
+    activeHeaderRange(): HeaderRange | null {
+      const key = this.activeTemplateKey
+      return key ? this.alignConfig?.headerRanges?.[key] ?? null : null
     },
     /** 当前表对的规则表草稿；尚未初始化时为 null */
     activeRuleDraft(): RuleTablePair | null {
@@ -355,6 +367,7 @@ export const useSessionStore = defineStore('session', {
           manualTablePairs: this.manualTablePairs,
           ruleTables: merged,
           anchors: this.effectiveAnchors,
+          headerRanges: this.alignConfig?.headerRanges ?? {},
           threshold: this.templateThreshold
         }
         // Pinia 响应式 Proxy 无法被 IPC 结构化克隆，先深拷贝为纯对象
@@ -387,6 +400,7 @@ export const useSessionStore = defineStore('session', {
       ruleTables?: Record<string, RuleTablePair>
       anchors?: string[]
       colors?: { diff: string; compared: string }
+      headerRanges?: Record<string, HeaderRange>
     }): AlignConfig | null {
       const base = this.alignConfig
       if (!base) return null
@@ -396,7 +410,8 @@ export const useSessionStore = defineStore('session', {
           version: 2,
           ruleTables: over?.ruleTables ?? base.ruleTables,
           anchors: over?.anchors ?? this.effectiveAnchors,
-          colors: over?.colors ?? this.templateColors
+          colors: over?.colors ?? this.templateColors,
+          headerRanges: over?.headerRanges ?? base.headerRanges ?? {}
         })
       ) as AlignConfig
     },
@@ -478,6 +493,22 @@ export const useSessionStore = defineStore('session', {
       await window.api.setAlignConfig(cfg)
       this.alignConfig = cfg
       this.ruleDirty = false
+      await this.runTemplateCheck()
+    },
+
+    /**
+     * 保存当前侧的表头范围（键 = 该侧表样键）并重新核对；传 null 等价于重置为自动探测。
+     */
+    async saveHeaderRange(range: HeaderRange | null): Promise<void> {
+      const key = this.activeTemplateKey
+      if (!key) return
+      const next: Record<string, HeaderRange> = { ...(this.alignConfig?.headerRanges ?? {}) }
+      if (range) next[key] = range
+      else delete next[key]
+      const cfg = this.buildAlignConfig({ headerRanges: next })
+      if (!cfg) throw new Error('配置未就绪，已放弃保存以避免覆盖已有规则')
+      await window.api.setAlignConfig(cfg)
+      this.alignConfig = cfg
       await this.runTemplateCheck()
     },
 

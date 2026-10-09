@@ -1,5 +1,6 @@
 import type {
   CellRange,
+  HeaderRange,
   RuleTable,
   RuleTablePair,
   SheetData,
@@ -127,15 +128,77 @@ function clampRange(r: CellRange, sheet: SheetData): CellRange {
   }
 }
 
+/** 表样解析的公共字段（各分支自行补齐 cells/degraded/headerSource/headerRange/anchor） */
+type TemplateBase = Omit<
+  TemplateSheet,
+  'cells' | 'degraded' | 'error' | 'headerSource' | 'headerRange' | 'anchor'
+>
+
+/** 表头范围解析结果 */
+interface ResolvedHeader {
+  range: CellRange
+  source: 'manual' | 'auto'
+  anchor?: { row: number; col: number; word: string }
+}
+
+/** 人为范围是否可用：三个字段都是非负整数且 bottom >= top */
+function isValidHeaderRange(h: HeaderRange): boolean {
+  const ok = (v: number): boolean => Number.isInteger(v) && v >= 0
+  return ok(h.top) && ok(h.bottom) && ok(h.labelEnd) && h.bottom >= h.top
+}
+
+/**
+ * 解析表头块范围。优先用人工存档；否则用锚点词 + 表头块上扩；都没有返回 null（交给降级解析）。
+ *
+ * 上扩：锚点合并格有时只盖住表头的最下一行（其上方那行标签列是空的），
+ * 此时仅取合并范围会丢掉上级表头行，使同一行列标签塌陷成同值。故从合并范围顶行起向上走，
+ * 只要该行在标签列 `0..labelEnd` 内（合并填充后）全为空就继续上扩，遇首个非空行停止。
+ * 判据用整个标签列、而非只看锚点列，才不会把「填报单位」这类行误并进来。
+ */
+function resolveHeaderRange(
+  sheet: SheetData,
+  m: string[][],
+  anchors: string[],
+  override?: HeaderRange
+): ResolvedHeader | null {
+  if (override && isValidHeaderRange(override)) {
+    return {
+      range: { r1: override.top, c1: 0, r2: override.bottom, c2: override.labelEnd },
+      source: 'manual'
+    }
+  }
+
+  const a = findAnchor(m, anchors)
+  if (!a) return null
+  const mg = (sheet.merges ?? []).find((x) => x.r1 === a.r && x.c1 === a.c)
+  const labelEnd = mg ? mg.c2 : a.c
+  const bottom = mg ? mg.r2 : a.r
+
+  let top = mg ? mg.r1 : a.r
+  for (let r = top - 1; r >= 0; r--) {
+    let blank = true
+    for (let c = 0; c <= labelEnd; c++) {
+      if ((m[r]?.[c] ?? '') !== '') {
+        blank = false
+        break
+      }
+    }
+    if (!blank) break
+    top = r
+  }
+
+  return {
+    range: { r1: top, c1: mg ? mg.c1 : a.c, r2: bottom, c2: labelEnd },
+    source: 'auto',
+    anchor: { row: a.r, col: a.c, word: a.word }
+  }
+}
+
 /**
  * 降级解析：锚点缺失或表头区无数据列时使用。
  * 只取全表可数值化的格（合并覆盖格跳过），行/列标签退化为行列位置。
  */
-function degradedSheet(
-  base: Omit<TemplateSheet, 'cells' | 'degraded' | 'error'>,
-  sheet: SheetData,
-  error?: string
-): TemplateSheet {
+function degradedSheet(base: TemplateBase, sheet: SheetData, error?: string): TemplateSheet {
   const spans = buildMergeSpans(sheet.merges, sheet.rowCount, sheet.colCount)
   const cells: TemplateCellRef[] = []
   for (let r = 0; r < sheet.rowCount; r++) {
@@ -157,7 +220,8 @@ function degradedSheet(
       })
     }
   }
-  return error ? { ...base, cells, degraded: true, error } : { ...base, cells, degraded: true }
+  const out: TemplateSheet = { ...base, cells, degraded: true, headerSource: 'degraded' }
+  return error ? { ...out, error } : out
 }
 
 /**
@@ -207,9 +271,11 @@ export function parseTemplateSheet(input: {
   anchors?: string[]
   /** 该侧已存的规则表（`"row,col"` → 规则值）：里面有、本次解析没产出的位置照样补成格 */
   ruleTable?: RuleTable
+  /** 用户存档的表头块范围；有则跳过自动探测 */
+  headerRange?: HeaderRange
 }): TemplateSheet {
-  const { sheet, fileName, workbookId, anchors, ruleTable } = input
-  const base = {
+  const { sheet, fileName, workbookId, anchors, ruleTable, headerRange } = input
+  const base: TemplateBase = {
     key: templateKeyOf(fileName),
     tableNo: tableNoOf(fileName),
     fileName,
@@ -226,23 +292,20 @@ export function parseTemplateSheet(input: {
   }
 
   const m = mergedLabelMatrix(sheet)
-  const a = findAnchor(m, resolveAnchors(anchors))
-  if (!a) return finish(degradedSheet(base, sheet))
+  const resolved = resolveHeaderRange(sheet, m, resolveAnchors(anchors), headerRange)
+  if (!resolved) return finish(degradedSheet(base, sheet))
 
-  const mg = (sheet.merges ?? []).find((x) => x.r1 === a.r && x.c1 === a.c)
-  const headerRange: CellRange = mg
-    ? clampRange({ r1: mg.r1, c1: mg.c1, r2: mg.r2, c2: mg.c2 }, sheet)
-    : { r1: a.r, c1: a.c, r2: a.r, c2: a.c }
-
-  const labelEnd = headerRange.c2
-  const dataStartRow = headerRange.r2 + 1
+  const { source } = resolved
+  const headerRange_ = clampRange(resolved.range, sheet)
+  const labelEnd = headerRange_.c2
+  const dataStartRow = headerRange_.r2 + 1
   const dataStartCol = labelEnd + 1
 
   // 列路径：表头行范围内有标签的列才是数据列
   const colPaths = new Map<number, string>()
   for (let c = dataStartCol; c < sheet.colCount; c++) {
     const parts: string[] = []
-    for (let r = headerRange.r1; r <= headerRange.r2; r++) parts.push(m[r]?.[c] ?? '')
+    for (let r = headerRange_.r1; r <= headerRange_.r2; r++) parts.push(m[r]?.[c] ?? '')
     const p = joinPath(parts)
     if (p) colPaths.set(c, p)
   }
@@ -278,26 +341,43 @@ export function parseTemplateSheet(input: {
     if (rowCells.length > 0) cells.push(...rowCells)
   }
 
-  return finish({ ...base, cells, degraded: false, anchor: { row: a.r, col: a.c, word: a.word } })
+  return finish({
+    ...base,
+    cells,
+    degraded: false,
+    headerSource: source,
+    headerRange: { top: headerRange_.r1, bottom: headerRange_.r2, labelEnd },
+    ...(resolved.anchor ? { anchor: resolved.anchor } : {})
+  })
 }
 
 /** 取工作簿第一个 sheet 解析（本项目报表均为单 sheet） */
 export function parseWorkbook(
   wb: WorkbookData,
   anchors?: string[],
-  ruleTable?: RuleTable
+  ruleTable?: RuleTable,
+  headerRange?: HeaderRange
 ): TemplateSheet {
   const name = wb.sheetNames[0]
   const sheet = name ? wb.sheets[name] : undefined
-  const base = {
+  const base: TemplateBase = {
     key: templateKeyOf(wb.fileName),
     tableNo: tableNoOf(wb.fileName),
     fileName: wb.fileName,
     workbookId: wb.id,
     sheetName: ''
   }
-  if (!sheet) return { ...base, cells: [], degraded: true, error: '工作簿中没有工作表' }
-  return parseTemplateSheet({ sheet, fileName: wb.fileName, workbookId: wb.id, anchors, ruleTable })
+  if (!sheet) {
+    return { ...base, cells: [], degraded: true, headerSource: 'degraded', error: '工作簿中没有工作表' }
+  }
+  return parseTemplateSheet({
+    sheet,
+    fileName: wb.fileName,
+    workbookId: wb.id,
+    anchors,
+    ruleTable,
+    headerRange
+  })
 }
 
 /** 表对配对结果 */

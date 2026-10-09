@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useSessionStore } from '../stores/session'
 import { buildMergeSpans } from '@shared/core/merge'
 import { colLetters, dataCol, makeSpanMethod } from '@shared/core/sheet-view'
 import { useDragPan } from '../utils/dragPan'
 import { useGridZoom } from '../utils/zoom'
 import { readableTextOn } from '../utils/templateColors'
+import type { HeaderRange } from '@shared/types'
 import ZoomBadge from './ZoomBadge.vue'
+
+const props = withDefaults(
+  defineProps<{
+    /** 表头范围框选模式：左键拖拽改为框选（暂停平移） */
+    selecting?: boolean
+    /** 进入框选时的预填范围（无存档时由父组件传自动探测结果） */
+    prefill?: HeaderRange | null
+  }>(),
+  { selecting: false, prefill: null }
+)
+const emit = defineEmits<{ 'select-range': [range: HeaderRange] }>()
 
 const session = useSessionStore()
 
@@ -40,9 +52,56 @@ const spans = computed(() =>
 )
 const spanMethod = makeSpanMethod(() => spans.value)
 
-const rows = computed(() =>
-  (sheetData.value?.cells ?? []).map((row, i) => ({ _rowIndex: i, cells: row }))
+// 选区（框选模式下的表头块）。labelEnd 取拖拽两列的较大者——行头列固定从第 0 列起
+const sel = ref<HeaderRange | null>(null)
+let dragFrom: { row: number; col: number } | null = null
+
+watch(
+  () => props.selecting,
+  (on) => {
+    sel.value = on && props.prefill ? { ...props.prefill } : null
+    dragFrom = null
+  },
+  { immediate: true }
 )
+
+// 让 rows 依赖 sel：cell-class-name 在 el-table 自身渲染中调用，不会因本组件 ref 变化重跑，
+// 故靠 rows 身份变化触发表格重绘（报表只有几十行，代价可接受）
+const rows = computed(() => {
+  void sel.value
+  return (sheetData.value?.cells ?? []).map((row, i) => ({ _rowIndex: i, cells: row }))
+})
+
+const hover = ref<{ row: number; col: number } | null>(null)
+
+/** el-table 的列属性 `"c3"` → 数据列号 3；序号列无 property 返回 -1 */
+function colIndexOf(column: { property?: string }): number {
+  const m = /^c(\d+)$/.exec(column.property ?? '')
+  return m ? Number(m[1]) : -1
+}
+
+function applySel(a: { row: number; col: number }, b: { row: number; col: number }): void {
+  sel.value = {
+    top: Math.min(a.row, b.row),
+    bottom: Math.max(a.row, b.row),
+    labelEnd: Math.max(a.col, b.col)
+  }
+}
+
+function onCellEnter(row: { _rowIndex: number }, column: { property?: string }): void {
+  const col = colIndexOf(column)
+  if (col < 0) return
+  hover.value = { row: row._rowIndex, col }
+  if (dragFrom) applySel(dragFrom, hover.value)
+}
+
+function onDocMouseUp(): void {
+  if (dragFrom && sel.value) emit('select-range', { ...sel.value })
+  dragFrom = null
+  document.removeEventListener('mouseup', onDocMouseUp)
+}
+
+onBeforeUnmount(() => document.removeEventListener('mouseup', onDocMouseUp))
 
 function cellText(rowIdx: number, colIdx: number): string {
   const cell = sheetData.value?.cells[rowIdx]?.[colIdx]
@@ -56,6 +115,11 @@ function cellClass({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: n
   const s = spans.value?.[rowIndex]?.[c]
   if (s && s.rowspan > 0) classes.push('merge-master')
   const pos = `${rowIndex},${c}`
+  // 框选模式下先铺表头块底色，再叠比对标记
+  const s2 = sel.value
+  if (s2 && rowIndex >= s2.top && rowIndex <= s2.bottom && c <= s2.labelEnd) {
+    classes.push('header-pick')
+  }
   // 参与比对是底色，被后两类标记叠在上面
   if (session.templateComparedSet.has(pos)) classes.push('compared')
   // 差异跳转聚焦格：紫色标记（优先于命中标记）
@@ -87,6 +151,15 @@ const { onMouseDown: startPan } = useDragPan(
 /** 仅表体触发平移：表头留给原生交互 */
 function onGridMouseDown(e: MouseEvent): void {
   if (!(e.target as HTMLElement | null)?.closest('.el-table__body-wrapper')) return
+  if (props.selecting) {
+    // 框选模式：左键改为框选起点，暂停平移
+    if (!hover.value) return
+    e.preventDefault()
+    dragFrom = { ...hover.value }
+    applySel(dragFrom, hover.value)
+    document.addEventListener('mouseup', onDocMouseUp)
+    return
+  }
   startPan(e)
 }
 
@@ -101,7 +174,12 @@ watch(
 </script>
 
 <template>
-  <div class="template-grid" :style="markerVars" @wheel="onZoomWheel">
+  <div
+    class="template-grid"
+    :class="{ selecting }"
+    :style="markerVars"
+    @wheel="onZoomWheel"
+  >
     <el-table
       v-if="sheetData"
       ref="gridRef"
@@ -113,6 +191,7 @@ watch(
       :cell-class-name="cellClass"
       :span-method="spanMethod"
       @mousedown="onGridMouseDown"
+      @cell-mouse-enter="onCellEnter"
     >
       <el-table-column
         type="index"
@@ -141,6 +220,9 @@ watch(
 .template-grid {
   position: relative;
 }
+.template-grid.selecting .el-table__body-wrapper {
+  cursor: crosshair;
+}
 </style>
 
 <style>
@@ -149,8 +231,11 @@ watch(
   color: #909399;
   font-weight: 400;
 }
-/* 顺序有意：底色最前，cell-focused 在后，同时命中时紫压粉（与 SheetGrid 一致）。
-   !important 不能省：el-table 的 hover 行规则特异性高于这三条。 */
+/* 顺序有意：表头框选底色最前，其余比对标记叠在其上。
+   !important 不能省：el-table 的 hover 行规则特异性高于这几条。 */
+.template-grid .el-table .header-pick {
+  background: #ede9fe !important;
+}
 .template-grid .el-table .compared {
   background: var(--tpl-cmp-bg, #fff3cd) !important;
   color: var(--tpl-cmp-fg, #1f2937);

@@ -134,6 +134,43 @@ describe.skipIf(!hasSamples)('新旧表比对 · 真实样例端到端', () => {
   })
 })
 
+/** R01/NR01：锚点「项目」格只合并了底下 1 行，其上方还有一整行表头（企业类型） */
+const DIR01 = resolve(__dirname, '../../../../samples/r01')
+const R01 = 'R01_1910_华润银行总行（全辖）_月_人民币_境内汇总数据_境内汇总数据_20260930.xls'
+const NR01 = 'NR01_1910_华润银行总行（全辖）_月_本外币_境内汇总数据_境内汇总数据_20260930.xls'
+const hasSamples01 = existsSync(resolve(DIR01, R01)) && existsSync(resolve(DIR01, NR01))
+
+describe.skipIf(!hasSamples01)('新旧表比对 · 锚点合并未盖满表头块（R01/NR01）', () => {
+  const load01 = (name: string): WorkbookData =>
+    parseExcel(readFileSync(resolve(DIR01, name)), name, 'file')
+
+  it('自动上扩把上级表头行并入，列路径不再塌陷', () => {
+    const t = parseWorkbook(load01(R01))
+    expect(t.degraded).toBe(false)
+    expect(t.headerSource).toBe('auto')
+    // 锚点在第 5 行（0 起始 4），真实表头自第 4 行（0 起始 3）起
+    expect(t.headerRange).toEqual({ top: 3, bottom: 4, labelEnd: 1 })
+    expect(t.cells.some((c) => c.colPath === '大型企业/发生额')).toBe(true)
+  })
+
+  it('两侧规则值一一配上：有比对结果、无重复值', () => {
+    const res = checkTemplates(parseWorkbook(load01(R01)), parseWorkbook(load01(NR01)), {
+      threshold: T
+    })
+    expect(res.left?.error).toBeUndefined()
+    expect(res.right?.error).toBeUndefined()
+    expect(res.totalCompared).toBeGreaterThan(0)
+    expect(res.duplicateRules).toEqual([])
+  })
+
+  it('手动表头范围优先于自动探测', () => {
+    const t = parseWorkbook(load01(R01), undefined, undefined, { top: 3, bottom: 4, labelEnd: 1 })
+    expect(t.headerSource).toBe('manual')
+    expect(t.headerRange).toEqual({ top: 3, bottom: 4, labelEnd: 1 })
+    expect(t.anchor).toBeUndefined()
+  })
+})
+
 describe.skipIf(!hasSamples21)('新旧表比对 · 锚点落在最后一个标签列（R21/NR21）', () => {
   const load21 = (name: string): TemplateSheet =>
     parseWorkbook(parseExcel(readFileSync(resolve(DIR, name)), name, 'file'), ['机构类别'])

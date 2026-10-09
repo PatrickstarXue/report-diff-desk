@@ -172,6 +172,16 @@ export interface CellRange {
   c2: number
 }
 
+/** 表头块范围（0 起始，含端点）：行头列取 `0..labelEnd`，表头行取 `top..bottom` */
+export interface HeaderRange {
+  /** 表头首行 */
+  top: number
+  /** 表头末行（角格所在行）；数据自 `bottom + 1` 行起 */
+  bottom: number
+  /** 角格列 = 行头列最右列；数据自 `labelEnd + 1` 列起 */
+  labelEnd: number
+}
+
 /** 规则表：位置键 `"row,col"`（0 起始）→ 规则值；空串表示该格不参与比对 */
 export type RuleTable = Record<string, string>
 
@@ -209,7 +219,11 @@ export interface TemplateSheet {
   cells: TemplateCellRef[]
   /** 锚点未识别：cells 只有位置/文本/数值，行/列标签已退化为行列位置 */
   degraded: boolean
-  /** 锚点命中的格（0 起始）与命中的候选词，供界面提示「这个报表认的是哪个词」；降级时缺席 */
+  /** 表头范围来源：manual=用户存档 / auto=自动探测 / degraded=降级为位置解析 */
+  headerSource: 'manual' | 'auto' | 'degraded'
+  /** 本次生效的表头块范围；降级时缺席 */
+  headerRange?: HeaderRange
+  /** 锚点命中的格（0 起始）与命中的候选词，供界面提示「这个报表认的是哪个词」；降级/手动时缺席 */
   anchor?: { row: number; col: number; word: string }
   error?: string
 }
@@ -287,6 +301,8 @@ export interface AlignConfig {
   anchors?: string[]
   /** 网格标记配色；缺席（或值非法）时用渲染层默认值 */
   colors?: { diff: string; compared: string }
+  /** 表头范围，键 = 单表样键（文件名去扩展名）；缺席的表走自动探测 */
+  headerRanges?: Record<string, HeaderRange>
 }
 
 /** 手动指定的表对关系（表号提不出或冲突时用），仅本次生效 */
@@ -304,5 +320,7 @@ export interface TemplateCheckRequest {
   ruleTables?: Record<string, RuleTablePair>
   /** 锚点词候选，按序尝试；缺席时用默认「项目」 */
   anchors?: string[]
+  /** 表头范围存档，按单表样键索引；缺席的表走自动探测 */
+  headerRanges?: Record<string, HeaderRange>
   threshold: number
 }

@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import type { AlignConfig } from '@shared/types'
+import type { AlignConfig, HeaderRange } from '@shared/types'
 
 /** 规则表配置（按 `左表样键|右表样键` 索引），落盘到 userData */
 function alignPath(): string {
@@ -11,6 +11,24 @@ function alignPath(): string {
 /** 配色值是否可用：非空字符串即可（具体格式由渲染层解析，解析不了会兜底） */
 function isColor(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== ''
+}
+
+/** 表头范围是否合法：三个字段都是非负整数且 bottom >= top */
+function isHeaderRange(v: unknown): v is HeaderRange {
+  if (typeof v !== 'object' || v === null) return false
+  const r = v as Record<string, unknown>
+  const ok = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x) && x >= 0
+  return ok(r.top) && ok(r.bottom) && ok(r.labelEnd) && r.bottom >= r.top
+}
+
+/** 读回表头范围：逐项过滤非法值，全空则视为缺席 */
+function readHeaderRanges(raw: unknown): Record<string, HeaderRange> | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const out: Record<string, HeaderRange> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (isHeaderRange(v)) out[k] = { top: v.top, bottom: v.bottom, labelEnd: v.labelEnd }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 /**
@@ -46,6 +64,9 @@ export async function loadAlignConfig(): Promise<AlignConfig> {
     const diff = raw?.colors?.diff
     const compared = raw?.colors?.compared
     if (isColor(diff) && isColor(compared)) cfg.colors = { diff, compared }
+    // headerRanges 同为可选字段，逐项校验后回填
+    const ranges = readHeaderRanges(raw?.headerRanges)
+    if (ranges) cfg.headerRanges = ranges
     return cfg
   } catch {
     throw new Error('人工规则配置解析失败：文件内容不是合法 JSON')

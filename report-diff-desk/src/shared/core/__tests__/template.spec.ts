@@ -73,6 +73,7 @@ function tsheet(
     workbookId: key,
     sheetName: key,
     degraded: false,
+    headerSource: 'auto',
     cells: cells.map(([row, col, rowPath, colPath, v]) => ({
       row,
       col,
@@ -625,5 +626,80 @@ describe('pairTemplateWorkbooks', () => {
     expect(res.pairs).toHaveLength(1)
     expect(res.unmatchedLeft).toEqual([])
     expect(res.unmatchedRight).toEqual([])
+  })
+})
+
+describe('parseTemplateSheet · 表头块范围', () => {
+  /** R01 式：锚点「项目」只合并底下 1 行，其上一行是标签列为空的同宽合并 + 数据列有分组标签 */
+  const r01Like = (): SheetData =>
+    sheetOf(
+      12,
+      8,
+      [
+        [2, 0, '填报单位：某行'],
+        [3, 2, '大型企业'],
+        [4, 0, '项    目'],
+        [4, 2, '发生额'],
+        [4, 3, '利率'],
+        [5, 0, '甲'],
+        [5, 2, 1],
+        [5, 3, 2]
+      ],
+      [
+        { r1: 3, c1: 0, r2: 3, c2: 1 },
+        { r1: 3, c1: 2, r2: 3, c2: 3 },
+        { r1: 4, c1: 0, r2: 4, c2: 1 }
+      ]
+    )
+
+  it('锚点合并未盖满表头时自动上扩到表头顶行，列路径不再塌陷', () => {
+    const t = parseTemplateSheet({ sheet: r01Like(), fileName: 'R01.xls', workbookId: 'w' })
+    expect(t.degraded).toBe(false)
+    expect(t.headerSource).toBe('auto')
+    expect(t.headerRange).toEqual({ top: 3, bottom: 4, labelEnd: 1 })
+    expect(t.cells.some((c) => c.colPath === '大型企业/发生额')).toBe(true)
+    expect(t.cells.some((c) => c.colPath === '大型企业/利率')).toBe(true)
+  })
+
+  it('标签区上方有文本时不误上扩', () => {
+    const s = sheetOf(
+      12,
+      8,
+      [
+        [3, 0, '填报单位：某行'],
+        [4, 0, '项    目'],
+        [4, 2, '发生额'],
+        [5, 0, '甲'],
+        [5, 2, 1]
+      ],
+      [
+        { r1: 3, c1: 0, r2: 3, c2: 1 },
+        { r1: 4, c1: 0, r2: 4, c2: 1 }
+      ]
+    )
+    const t = parseTemplateSheet({ sheet: s, fileName: 'X.xls', workbookId: 'w' })
+    expect(t.headerRange?.top).toBe(4)
+  })
+
+  it('传入 headerRange 时直接采用，标为 manual', () => {
+    const t = parseTemplateSheet({
+      sheet: r01Like(),
+      fileName: 'R01.xls',
+      workbookId: 'w',
+      headerRange: { top: 4, bottom: 4, labelEnd: 1 }
+    })
+    expect(t.headerSource).toBe('manual')
+    expect(t.anchor).toBeUndefined()
+    expect(t.cells.some((c) => c.colPath === '发生额')).toBe(true)
+  })
+
+  it('无锚点且无存档 → 降级解析', () => {
+    const s = sheetOf(12, 8, [
+      [5, 0, '甲'],
+      [5, 2, 1]
+    ])
+    const t = parseTemplateSheet({ sheet: s, fileName: 'X.xls', workbookId: 'w' })
+    expect(t.degraded).toBe(true)
+    expect(t.headerSource).toBe('degraded')
   })
 })

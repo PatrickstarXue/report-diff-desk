@@ -241,12 +241,13 @@ export function registerIpc(): void {
         right as WorkbookData[],
         req.manualTablePairs ?? []
       )
+      const ranges = req.headerRanges ?? {}
       const pairs = pairing.pairs.map((p) => {
         const key = `${templateKeyOf(p.left.fileName)}|${templateKeyOf(p.right.fileName)}`
         const rt = req.ruleTables?.[key]
         return checkTemplates(
-          parseWorkbook(p.left, anchors, rt?.left),
-          parseWorkbook(p.right, anchors, rt?.right),
+          parseWorkbook(p.left, anchors, rt?.left, ranges[templateKeyOf(p.left.fileName)]),
+          parseWorkbook(p.right, anchors, rt?.right, ranges[templateKeyOf(p.right.fileName)]),
           { threshold, ruleTable: rt }
         )
       })

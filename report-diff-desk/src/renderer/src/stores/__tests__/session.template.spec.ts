@@ -31,6 +31,7 @@ const seedSheet = (key: string, fileName: string, workbookId: string): TemplateS
   workbookId,
   sheetName: key,
   degraded: false,
+  headerSource: 'auto',
   cells: [seedCell()]
 })
 

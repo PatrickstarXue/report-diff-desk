@@ -179,6 +179,14 @@ watch(
 </template>
 
 <style>
+/* 封死文档级滚动：整个应用自成一体，滚动一律交给面板内部，
+   最外侧不再挂滚动条（窄窗口下横向溢出也一并挡掉） */
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
 body {
   margin: 0;
 }
@@ -189,7 +197,7 @@ body.is-panning * {
   user-select: none !important;
 }
 .app-root {
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 .app-aside {
