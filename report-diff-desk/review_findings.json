@@ -1,0 +1,50 @@
+[
+  {
+    "file": "CLAUDE.md",
+    "line": 1,
+    "summary": "CLAUDE.md 文件已被替换为项目特定文档，不再引用 superpowers-zh 技能框架",
+    "failure_scenario": "无失败场景。新文档引用的所有目录和文件都存在：src/shared/、src/main/、src/renderer/src/、src/shared/ipc.ts、src/shared/api.ts、src/renderer/src/stores/session.ts 等。superpowers-zh 技能仍存在于 .claude/skills/ 目录，但新文档无需引用它们。"
+  },
+  {
+    "file": "electron-builder.yml",
+    "line": 10,
+    "summary": "compression: maximum 是有效的 electron-builder 配置，不会破坏构建流程",
+    "failure_scenario": "无失败场景。dist/builder-effective-config.yaml 确认此设置已被正确应用。该设置仅影响打包压缩率，不影响构建逻辑或文件包含规则。"
+  },
+  {
+    "file": "package.json",
+    "line": 3,
+    "summary": "版本从 1.0.0 升级到 1.1.0，electron-builder.yml 中的 ${version} 变量会自动使用新版本",
+    "failure_scenario": "无失败场景。electron-builder.yml 第 19 行和第 21 行的 artifactName 使用 ${version} 变量，会自动读取 package.json 中的版本号。没有发现其他脚本或配置文件硬编码了 1.0.0 版本号。"
+  },
+  {
+    "file": "package-lock.json",
+    "line": 1,
+    "summary": "package-lock.json 仍包含旧版本 1.0.0 的引用",
+    "failure_scenario": "无失败场景。这是 npm 的正常行为——lock 文件记录依赖树，package.json 的版本变更不会自动更新 lock 文件中的所有引用。构建时 npm 会正确处理版本差异。"
+  },
+  {
+    "file": ".claude/skills/",
+    "line": 1,
+    "summary": "superpowers-zh 技能文件仍存在于 .claude/skills/ 目录，但新 CLAUDE.md 不再引用它们",
+    "failure_scenario": "无失败场景。技能文件是独立的，不依赖 CLAUDE.md 引用。用户仍可通过 /brainstorming 等命令调用这些技能，只是新文档没有明确说明它们的存在。"
+  },
+  {
+    "file": "scripts/make-samples.mjs",
+    "line": 1,
+    "summary": "构建脚本不引用 package.json 版本号，版本升级不影响其功能",
+    "failure_scenario": "无失败场景。脚本仅生成示例文件，不依赖版本号。"
+  },
+  {
+    "file": "scripts/make-icon.mjs",
+    "line": 1,
+    "summary": "图标生成脚本不引用 package.json 版本号",
+    "failure_scenario": "无失败场景。脚本仅生成图标文件，不依赖版本号。"
+  },
+  {
+    "file": "dist/builder-effective-config.yaml",
+    "line": 12,
+    "summary": "确认 compression: maximum 已被 electron-builder 正确应用到构建配置",
+    "failure_scenario": "无失败场景。构建配置正确包含了所有必要设置，包括 node_modules 排除规则。"
+  }
+]

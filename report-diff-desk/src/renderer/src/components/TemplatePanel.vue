@@ -41,6 +41,13 @@ const subTab = ref('result')
 /** 差异列表默认展开；只想看下方网格标色时收起它 */
 const openPanels = ref<string[]>(['diffs'])
 
+/** 面板滚到非顶部时给吸顶条加分隔与投影，未滚动则保持无缝 */
+const panelRef = ref<HTMLElement | null>(null)
+const stuck = ref(false)
+function onPanelScroll(): void {
+  stuck.value = (panelRef.value?.scrollTop ?? 0) > 0
+}
+
 onMounted(() => {
   session.reloadAlignConfig().catch(() => {
     ElMessage.error('规则表配置读取失败，本次会话请勿保存规则以免覆盖')
@@ -283,9 +290,9 @@ async function resetRange(): Promise<void> {
 </script>
 
 <template>
-  <div class="template-panel">
+  <div ref="panelRef" class="template-panel" @scroll.passive="onPanelScroll">
     <!-- 顶部工具条整块吸顶：面板内容另有一层滚动，滚动时这些操作保持可见 -->
-    <div class="template-head">
+    <div class="template-head" :class="{ 'is-stuck': stuck }">
       <div class="panel-toolbar">
         <el-button size="small" type="primary" plain @click="openSide('left')">
           左侧报表（R 系列）
@@ -542,7 +549,8 @@ async function resetRange(): Promise<void> {
   gap: 8px;
   height: 100%;
   overflow: auto;
-  padding: 4px;
+  /* 顶部不留内边距：吸顶条底色直达面板顶端，滚动时上方不会漏出内容形成第二条缝 */
+  padding: 0 4px 4px;
 }
 /* 整块顶部工具条吸顶：面板自身是滚动容器，内容滚动时这些操作保持可见。
    必须给不透明背景，否则滚到底下会被内容透出。 */
@@ -553,8 +561,15 @@ async function resetRange(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-bottom: 4px;
+  padding: 4px 0;
   background: var(--el-bg-color, #fff);
+  transition: box-shadow 0.18s ease;
+}
+/* 滚到非顶部才浮起来：1px 发丝线用 box-shadow 画（不占位，避免 1px 跳动）+ 一层柔影 */
+.template-head.is-stuck {
+  box-shadow:
+    0 1px 0 var(--el-border-color-lighter),
+    0 6px 8px -6px rgb(0 0 0 / 18%);
 }
 .panel-toolbar {
   display: flex;
