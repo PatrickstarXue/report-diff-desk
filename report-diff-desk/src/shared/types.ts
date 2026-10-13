@@ -27,6 +27,8 @@ export interface SheetData {
   cells: (GridCell | null)[][]
   /** 合并区域；仅主格（左上角）有值 */
   merges?: MergedRange[]
+  /** 实际数据超展开上限被截断（幽灵选区已按实际数据收缩，不会误标）；渲染层可提示用户 */
+  truncated?: boolean
 }
 
 export interface WorkbookData {
@@ -152,7 +154,7 @@ export interface ExportRequest {
   /** 原文件路径：zip 导出需要重新读取原文件以保留格式 */
   basePath?: string
   currPath?: string
-  targetPath?: string
+  // 导出目标不接收渲染层传入路径：一律由主进程 showSaveDialog 确认（防任意路径写）
 }
 
 export interface ExportResult {

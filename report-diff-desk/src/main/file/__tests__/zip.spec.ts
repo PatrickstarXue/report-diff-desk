@@ -53,3 +53,33 @@ describe('parseZip', () => {
     expect(wbs[0].fileName).toBe('混合.zip/数据.xlsx')
   })
 })
+
+describe('parseZip zip 炸弹防护 (S2)', () => {
+  it('条目数超上限抛错（默认 500）', async () => {
+    const zip = new JSZip()
+    for (let i = 0; i < 501; i++) zip.file(`f${i}.txt`, 'x')
+    zip.file('数据.xlsx', makeXlsxBuffer('数据', 1))
+    const buf = await zip.generateAsync({ type: 'nodebuffer' })
+
+    await expect(parseZip(buf, '炸弹.zip')).rejects.toThrow('条目过多')
+  })
+
+  it('解压总大小超上限抛错（声明大小前置拦截）', async () => {
+    const zip = new JSZip()
+    zip.file('a.xlsx', makeXlsxBuffer('数据', 1))
+    zip.file('b.xlsx', makeXlsxBuffer('数据', 2))
+    const buf = await zip.generateAsync({ type: 'nodebuffer' })
+
+    await expect(parseZip(buf, '大包.zip', { maxTotalBytes: 100 })).rejects.toThrow('总大小超过上限')
+  })
+
+  it('注入上限内正常解析', async () => {
+    const zip = new JSZip()
+    zip.file('a.xlsx', makeXlsxBuffer('数据', 1))
+    zip.file('b.xlsx', makeXlsxBuffer('数据', 2))
+    const buf = await zip.generateAsync({ type: 'nodebuffer' })
+
+    const wbs = await parseZip(buf, '正常.zip', { maxEntries: 10, maxTotalBytes: 10_000_000 })
+    expect(wbs).toHaveLength(2)
+  })
+})

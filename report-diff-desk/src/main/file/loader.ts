@@ -1,13 +1,13 @@
-import { readFile } from 'fs/promises'
 import { extname } from 'path'
 import type { DocContent, WorkbookData } from '@shared/types'
 import { parseExcel } from './excel'
 import { parseZip } from './zip'
+import { readFileWithLimit } from './read-guard'
 import { putWorkbook } from '../store'
 
 /** 按扩展名分发解析报表文件（单 Excel 或 zip 包），结果写入会话缓存 */
 export async function loadReportFile(path: string): Promise<WorkbookData[]> {
-  const buf = await readFile(path)
+  const buf = await readFileWithLimit(path)
   const ext = extname(path).toLowerCase()
   const baseName = path.split(/[\\/]/).pop() ?? path
 
@@ -22,7 +22,7 @@ export async function loadReportFile(path: string): Promise<WorkbookData[]> {
 
 /** 按扩展名分发解析口径文档（PDF / Excel 报表）；旧版 docx/txt 已移除 */
 export async function loadDocFile(path: string): Promise<DocContent> {
-  const buf = await readFile(path)
+  const buf = await readFileWithLimit(path)
   const ext = extname(path).toLowerCase()
   const name = path.split(/[\\/]/).pop() ?? path
 

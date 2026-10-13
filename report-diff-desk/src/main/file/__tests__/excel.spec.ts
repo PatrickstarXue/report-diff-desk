@@ -97,3 +97,88 @@ describe('parseExcel (xlsx)', () => {
     expect(parsed.sheets['数据'].cells[0][1]?.v).toBe(42)
   })
 })
+
+describe('parseExcel 幽灵选区防护 (S3)', () => {
+  it('!ref 被残留格式撑大时按实际数据收缩，不全量展开', () => {
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([['a', 'b'], ['c', 100]])
+    // 模拟幽灵选区：残留格式把 !ref 撑到 5001 行 × 101 列，实际只有 4 个格
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 5000, c: 100 } })
+    XLSX.utils.book_append_sheet(wb, ws, '幽灵')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    const s = parseExcel(buf, 'ghost.xlsx', 'file').sheets['幽灵']
+    expect(s.rowCount).toBe(2)
+    expect(s.colCount).toBe(2)
+    expect(s.cells[1][1]?.v).toBe(100)
+    expect(s.truncated).toBeUndefined() // 收缩自实际数据，不算截断
+  })
+
+  it('收缩起点保持 !ref 首行：行号基准不乱（diff/规则表坐标不受影响）', () => {
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([
+      [null, null],
+      [null, null],
+      ['第3行', 30] // 真实数据从第 3 行起
+    ])
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 9999, c: 50 } })
+    XLSX.utils.book_append_sheet(wb, ws, '偏移')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    const s = parseExcel(buf, 'offset.xlsx', 'file').sheets['偏移']
+    expect(s.rowCount).toBe(3) // 起点未动，行号仍对齐 Excel
+    expect(s.cells[2][0]?.v).toBe('第3行')
+  })
+
+  it('越界合并区（幽灵残留）被丢弃，不进 IPC', () => {
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([[1], [2]])
+    ws['!merges'] = [{ s: { r: 5000, c: 0 }, e: { r: 5000, c: 1 } }] // 引用幽灵区域的合并
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 9999, c: 9 } })
+    XLSX.utils.book_append_sheet(wb, ws, '越界合并')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    const s = parseExcel(buf, 'badmerge.xlsx', 'file').sheets['越界合并']
+    expect(s.merges).toBeUndefined()
+  })
+
+  it('列数超上限截断并标记 truncated', () => {
+    const wb = XLSX.utils.book_new()
+    const row = Array.from({ length: 2001 }, (_, c) => c) // 2001 列 > MAX_COLS 2000
+    const ws = XLSX.utils.aoa_to_sheet([row])
+    XLSX.utils.book_append_sheet(wb, ws, '超宽')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    const s = parseExcel(buf, 'wide.xlsx', 'file').sheets['超宽']
+    expect(s.colCount).toBe(2000)
+    expect(s.truncated).toBe(true)
+    expect(s.cells[0][1999]?.v).toBe(1999) // 保留的前 2000 列数据完好
+  })
+
+  it('行数超上限截断并标记 truncated', () => {
+    const wb = XLSX.utils.book_new()
+    // 100001 行 > MAX_ROWS 100000，每行一个行号值
+    const rows = Array.from({ length: 100001 }, (_, r) => [r])
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    XLSX.utils.book_append_sheet(wb, ws, '超高')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    const s = parseExcel(buf, 'tall.xlsx', 'file').sheets['超高']
+    expect(s.rowCount).toBe(100000)
+    expect(s.truncated).toBe(true)
+    expect(s.cells[99999][0]?.v).toBe(99999) // 前 10 万行完好
+  })
+
+  it('只有 !ref 没有数据格时按空表处理', () => {
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([['x']])
+    delete ws['A1'] // 删掉唯一数据格，!ref 仍在
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 99, c: 9 } })
+    XLSX.utils.book_append_sheet(wb, ws, '空壳')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    const s = parseExcel(buf, 'hollow.xlsx', 'file').sheets['空壳']
+    expect(s.rowCount).toBe(0)
+    expect(s.colCount).toBe(0)
+  })
+})

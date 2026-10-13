@@ -30,6 +30,7 @@ import type {
 import { loadAlignConfig, saveAlignConfig } from './align'
 import { loadDocFile, loadReportFile } from './file/loader'
 import { parseExcel } from './file/excel'
+import { readFileWithLimit } from './file/read-guard'
 import { buildExcelZipBuffer } from './export/excel'
 import { buildHtmlReport } from './export/html'
 import { getWorkbook } from './store'
@@ -126,7 +127,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.mappingLoad, async (_e, req: { path: string }): Promise<MappingRows> => {
     if (typeof req?.path !== 'string') throw new Error('无效的映射表路径')
-    const wb = parseExcel(await readFile(req.path), 'mapping', 'file')
+    const wb = parseExcel(await readFileWithLimit(req.path), 'mapping', 'file')
     const sheet = wb.sheets[wb.sheetNames[0]]
     const rows: string[][] = []
     for (const row of sheet?.cells ?? []) {
@@ -168,18 +169,14 @@ export function registerIpc(): void {
       .slice(0, 16)
       .replace(/[-:]/g, '')
       .replace('T', '_')
-    let target = req.targetPath
-    if (!target) {
-      const r = await dialog.showSaveDialog({
-        title: '导出比对结果',
-        defaultPath: join(app.getPath('documents'), `比对结果_${stamp}.${ext}`),
-        filters: [
-          { name: ext === 'zip' ? 'Zip 压缩包' : 'HTML 报告', extensions: [ext] }
-        ]
-      })
-      if (r.canceled || !r.filePath) return { canceled: true }
-      target = r.filePath
-    }
+    // 导出目标一律由主进程对话框确认：不信任渲染层传入的路径（防任意路径写）
+    const r = await dialog.showSaveDialog({
+      title: '导出比对结果',
+      defaultPath: join(app.getPath('documents'), `比对结果_${stamp}.${ext}`),
+      filters: [{ name: ext === 'zip' ? 'Zip 压缩包' : 'HTML 报告', extensions: [ext] }]
+    })
+    if (r.canceled || !r.filePath) return { canceled: true }
+    const target = r.filePath
 
     let note: string | undefined
     if (req.format === 'excel') {
