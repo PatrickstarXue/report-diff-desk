@@ -389,11 +389,12 @@ async function resetRange(): Promise<void> {
           :model-value="session.templatePairIndex"
           size="small"
           class="pair-select"
+          popper-class="pair-select-popper"
           @update:model-value="onPairIndexChange"
         >
           <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index">
             <span class="pair-option">
-              <span class="pair-option-label">{{ o.label }}</span>
+              <span class="pair-option-label" :title="o.label">{{ o.label }}</span>
               <!-- 该表对存过规则表才出现垃圾桶；stop 掉点击，避免顺带选中这一项 -->
               <span
                 v-if="o.hasSavedRule"
@@ -649,12 +650,27 @@ async function resetRange(): Promise<void> {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
 }
 .pair-option-label {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
+}
+/*
+ * 下拉浮层会被长文件名撑宽（el-option 是 nowrap，popper 宽度按内容 max-content 撑），
+ * 宽度一超出视口，贴右的垃圾桶就被顶到屏幕外——表现为「文件名一长删除按钮就没了」。
+ * 这里把浮层宽度钉死，超出部分由标签自己省略号截断，图标永远可见。
+ */
+:global(.pair-select-popper) {
+  width: 420px;
+  max-width: calc(100vw - 24px);
+}
+:global(.pair-select-popper .el-select-dropdown__item) {
+  width: 100%;
+  box-sizing: border-box;
 }
 .pair-option-del {
   flex: none;
