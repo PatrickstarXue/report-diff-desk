@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, type WritableComputedRef } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { HeaderRange, TemplateDiff, TemplateSheet } from '@shared/types'
 import { templateKeyOf } from '@shared/core/template'
 import { colLetter } from '@shared/core/sheet-view'
@@ -119,11 +119,42 @@ const dupRows = computed(() => {
 })
 
 const pairOptions = computed(() =>
-  (result.value?.pairs ?? []).map((p, i) => ({
-    index: i,
-    label: `${p.tableNo ?? '?'}：${templateKeyOf(p.leftFile)} ↔ ${templateKeyOf(p.rightFile)}`
-  }))
+  (result.value?.pairs ?? []).map((p, i) => {
+    // 规则表存档键与 session.activeRuleKey 的拼法保持一致，删除时才能对上
+    const key = `${templateKeyOf(p.leftFile)}|${templateKeyOf(p.rightFile)}`
+    return {
+      index: i,
+      key,
+      hasSavedRule: !!session.alignConfig?.ruleTables?.[key],
+      label: `${p.tableNo ?? '?'}：${templateKeyOf(p.leftFile)} ↔ ${templateKeyOf(p.rightFile)}`
+    }
+  })
 )
+
+/**
+ * 删除某个表对已存档的规则表（下拉框里的垃圾桶）。
+ * 只删存档与内存草稿，不动报表文件本身；删完重新核对，该表对回到解析种子。
+ */
+async function onDeleteSavedRule(o: { key: string; label: string }): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `将删除表对「${o.label}」已保存的规则表（人工对齐与存档值一并丢弃），删除后按当前解析结果重新生成。继续？`,
+      '删除存档规则',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    if (!(await session.deleteRuleTable(o.key))) {
+      ElMessage.info('该表对没有存档规则')
+      return
+    }
+    ElMessage.success('已删除该表对的存档规则')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
 
 /** 解析失败的表提示（两侧任一侧有 error 就显示） */
 const pairError = computed(() => pair.value?.left?.error ?? pair.value?.right?.error ?? '')
@@ -360,7 +391,30 @@ async function resetRange(): Promise<void> {
           class="pair-select"
           @update:model-value="onPairIndexChange"
         >
-          <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index" />
+          <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index">
+            <span class="pair-option">
+              <span class="pair-option-label">{{ o.label }}</span>
+              <!-- 该表对存过规则表才出现垃圾桶；stop 掉点击，避免顺带选中这一项 -->
+              <span
+                v-if="o.hasSavedRule"
+                class="pair-option-del"
+                title="删除该表对的存档规则"
+                @click.stop.prevent="onDeleteSavedRule(o)"
+                @mousedown.stop.prevent
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                  <path
+                    d="M2.5 4.5h11M6 4.5V3.2c0-.4.3-.7.7-.7h2.6c.4 0 .7.3.7.7v1.3M4 4.5l.6 8.6c0 .4.4.7.8.7h5.2c.4 0 .8-.3.8-.7l.6-8.6M6.5 7v4.5M9.5 7v4.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </span>
+            </span>
+          </el-option>
         </el-select>
         <el-radio-group
           :model-value="session.templateSide"
@@ -588,6 +642,29 @@ async function resetRange(): Promise<void> {
 }
 .pair-select {
   width: 340px;
+}
+/* 表对下拉项：标签占满左侧，存档规则存在时右侧给一个垃圾桶 */
+.pair-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.pair-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pair-option-del {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--el-text-color-placeholder);
+  cursor: pointer;
+}
+.pair-option-del:hover {
+  color: var(--el-color-danger);
 }
 /* 未配对指定表对：贴住「表对」那一行的右端 */
 .pair-unmatched {

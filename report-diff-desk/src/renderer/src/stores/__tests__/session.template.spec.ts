@@ -406,3 +406,49 @@ describe('以锚点自动填充 · 手工表头范围', () => {
     expect(s.activeRuleDraft?.left['5,3']).toBeUndefined()
   })
 })
+
+describe('删除存档规则', () => {
+  it('删除存档与内存草稿，核对载荷不再带该表对；无存档时返回 false 且不写盘', async () => {
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    s.alignConfig = await window.api.getAlignConfig()
+    await s.runTemplateCheck() // 表对键来自核对结果，没有结果时 saveRuleTable 会直接返回
+    s.ruleDrafts['R06|NR06'] = { left: { '5,3': '人工对齐值' }, right: { '5,3': '人工对齐值' } }
+    await s.saveRuleTable()
+    expect(storedConfig.ruleTables['R06|NR06']).toBeDefined()
+
+    await expect(s.deleteRuleTable('R06|NR06')).resolves.toBe(true)
+    // 盘上存档没了
+    expect(storedConfig.ruleTables['R06|NR06']).toBeUndefined()
+    // 内存草稿也清掉：否则草稿优先于存档，核对仍会用旧值
+    expect(s.ruleDrafts['R06|NR06']).toBeUndefined()
+    // 删除后按无存档重新核对
+    expect((lastRequest.ruleTables as Record<string, unknown>)['R06|NR06']).toBeUndefined()
+    expect(s.ruleDirty).toBe(false)
+
+    // 再删一次：没有存档 → false，且不再写盘
+    const writes = setCalls.length
+    await expect(s.deleteRuleTable('R06|NR06')).resolves.toBe(false)
+    expect(setCalls).toHaveLength(writes)
+  })
+
+  it('只删指定表对，其它表对的存档原样保留', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: {
+        'R06|NR06': { left: { '5,3': 'a' }, right: { '5,3': 'a' } },
+        'R31|NR31': { left: { '5,3': 'b' }, right: { '5,3': 'b' } }
+      }
+    }
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    await s.reloadAlignConfig()
+    await s.runTemplateCheck()
+
+    await s.deleteRuleTable('R06|NR06')
+    expect(Object.keys(storedConfig.ruleTables)).toEqual(['R31|NR31'])
+    expect(storedConfig.ruleTables['R31|NR31'].left['5,3']).toBe('b')
+  })
+})

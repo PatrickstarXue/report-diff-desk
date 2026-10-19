@@ -162,17 +162,20 @@ async function restoreSaved(): Promise<void> {
     <!-- 已核对：可编辑规则表 -->
     <template v-if="editable">
       <div class="rule-toolbar">
-        <span class="hint">
+        <span class="hint rule-tip">
           两侧规则值<strong>相同</strong>才参与比对；清空某格 = 该格不比对。规则值形如
           <strong>行规则值_列规则值</strong>，行首/列首的「批量」只改各自那一半。改动即时生效，点「保存规则」持久化。
           <br />
           灰底格 = 当前解析没产出这一格（多半是锚点词不对、解析降级了），<strong>不参与比对，也不会标绿</strong>；把锚点词改对再核对即可。
           <strong>已手动设置表头范围时锚点不生效</strong>，点「以锚点自动填充」会提示清除后再重解析。
         </span>
-        <span v-if="session.ruleDirty" class="dirty">有未保存的修改</span>
-        <el-button size="small" type="primary" @click="save">保存规则</el-button>
-        <el-button size="small" plain @click="reseed">以锚点自动填充</el-button>
-        <el-button size="small" plain @click="restoreSaved">恢复存档规则</el-button>
+        <!-- 按钮单独一行：说明文字整行铺满，避免按钮被长文本挤到同一行的尾巴上 -->
+        <div class="rule-actions">
+          <span v-if="session.ruleDirty" class="dirty">有未保存的修改</span>
+          <el-button size="small" type="primary" @click="save">保存规则</el-button>
+          <el-button size="small" plain @click="reseed">以锚点自动填充</el-button>
+          <el-button size="small" plain @click="restoreSaved">恢复存档规则</el-button>
+        </div>
       </div>
       <div class="rule-tables" :style="{ zoom: zoomScale }">
         <RuleTable
@@ -237,6 +240,17 @@ async function restoreSaved(): Promise<void> {
   padding: 4px;
 }
 .rule-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* 说明整行铺满，按钮被挤到下一行 */
+.rule-tip {
+  flex: 1 0 100%;
+  line-height: 1.7;
+}
+.rule-actions {
   display: flex;
   align-items: center;
   gap: 10px;

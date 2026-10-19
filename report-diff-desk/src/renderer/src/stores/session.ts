@@ -506,6 +506,32 @@ export const useSessionStore = defineStore('session', {
     },
 
     /**
+     * 删除某个表对的存档规则表（「表对」下拉框里的删除入口）。
+     * 内存草稿里同一键的旧值必须一起清掉——核对时草稿优先于存档，
+     * 只删盘上那份的话，草稿里的旧规则仍会参与比对，删了等于没删。
+     * @returns 该表对本来就没有存档时返回 false（调用方据此提示，不写盘）
+     */
+    async deleteRuleTable(key: string): Promise<boolean> {
+      const tables = this.alignConfig?.ruleTables ?? {}
+      if (!key || !tables[key]) return false
+      const next: Record<string, RuleTablePair> = { ...tables }
+      delete next[key]
+      const cfg = this.buildAlignConfig({ ruleTables: next })
+      if (!cfg) throw new Error('配置未就绪，已放弃删除以避免覆盖已有规则')
+      await window.api.setAlignConfig(cfg)
+      this.alignConfig = cfg
+      if (this.ruleDrafts[key]) {
+        const drafts = { ...this.ruleDrafts }
+        delete drafts[key]
+        this.ruleDrafts = drafts
+      }
+      if (this.activeRuleKey === key) this.ruleDirty = false
+      // 存档变了，按新规则（无存档 → 全用解析种子）重新核对
+      await this.runTemplateCheck()
+      return true
+    },
+
+    /**
      * 保存当前侧的表头范围（键 = 该侧表样键）并重新核对；传 null 等价于重置为自动探测。
      */
     async saveHeaderRange(range: HeaderRange | null): Promise<void> {
