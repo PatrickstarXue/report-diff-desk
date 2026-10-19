@@ -161,6 +161,14 @@ export const useSessionStore = defineStore('session', {
       const key = this.activeTemplateKey
       return key ? this.alignConfig?.headerRanges?.[key] ?? null : null
     },
+    /** 当前表对两侧表样键里，已存手工表头范围的那些（这些表的锚点词不会生效） */
+    activePairManualHeaderKeys(): string[] {
+      const p = this.templateResult?.pairs[this.templatePairIndex]
+      if (!p) return []
+      return [templateKeyOf(p.leftFile), templateKeyOf(p.rightFile)].filter(
+        (k) => !!this.alignConfig?.headerRanges?.[k]
+      )
+    },
     /** 当前表对的规则表草稿；尚未初始化时为 null */
     activeRuleDraft(): RuleTablePair | null {
       return this.ruleDrafts[this.activeRuleKey] ?? null
@@ -468,10 +476,10 @@ export const useSessionStore = defineStore('session', {
      * 只用种子（不吃 alignConfig 里的存档）：想吃存档是「恢复存档规则」那件事，
      * 两个按钮要互不重叠，否则「以锚点自动填充」填出来的还是旧规则。
      */
-    reseedRuleTable(): void {
+    reseedRuleTable(): boolean {
       const key = this.activeRuleKey
       const p = this.templateResult?.pairs[this.templatePairIndex]
-      if (!key || !p) return
+      if (!key || !p) return false
       const build = (t: TemplateSheet | null): RuleTable => {
         const out: RuleTable = {}
         for (const c of t?.cells ?? []) out[`${c.row},${c.col}`] = c.seed
@@ -479,6 +487,7 @@ export const useSessionStore = defineStore('session', {
       }
       this.ruleDrafts = { ...this.ruleDrafts, [key]: { left: build(p.left), right: build(p.right) } }
       this.ruleDirty = false
+      return true
     },
 
     /** 保存当前表对的规则表并重新核对（保留当前表对，避免保存后跳回第 1 对） */
@@ -512,7 +521,26 @@ export const useSessionStore = defineStore('session', {
       await this.runTemplateCheck()
     },
 
-    /** 差异列表行点击 → 切到对应侧并跳转 */
+    /**
+     * 清除指定表样键的手工表头范围（恢复自动识别），一次写盘并重新核对。
+     * 手工范围优先级高于锚点：「以锚点自动填充」必须先清掉它，否则改锚点词、点按钮都不会有任何变化。
+     */
+    async clearHeaderRanges(keys: string[]): Promise<void> {
+      const next: Record<string, HeaderRange> = { ...(this.alignConfig?.headerRanges ?? {}) }
+      let changed = false
+      for (const k of keys) {
+        if (k in next) {
+          delete next[k]
+          changed = true
+        }
+      }
+      if (!changed) return
+      const cfg = this.buildAlignConfig({ headerRanges: next })
+      if (!cfg) throw new Error('配置未就绪，已放弃修改以避免覆盖已有规则')
+      await window.api.setAlignConfig(cfg)
+      this.alignConfig = cfg
+      await this.runTemplateCheck()
+    },
     focusTemplateCell(pairIndex: number, side: 'left' | 'right', row: number, col: number): void {
       this.templatePairIndex = pairIndex
       this.templateSide = side

@@ -339,3 +339,70 @@ describe('锚点词', () => {
     expect(setCalls[0].anchors).toEqual(['项目', '机构类别'])
   })
 })
+
+describe('以锚点自动填充 · 手工表头范围', () => {
+  it('activePairManualHeaderKeys 只列当前表对里存了手工范围的键', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: {},
+      headerRanges: {
+        R06: { top: 1, bottom: 2, labelEnd: 0 },
+        R31: { top: 1, bottom: 2, labelEnd: 0 }
+      }
+    }
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    await s.reloadAlignConfig()
+    await s.runTemplateCheck()
+    expect(s.activePairManualHeaderKeys).toEqual(['R06'])
+  })
+
+  it('clearHeaderRanges 只清指定键、一次写盘并重新核对', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: {},
+      headerRanges: {
+        R06: { top: 1, bottom: 2, labelEnd: 0 },
+        NR06: { top: 1, bottom: 2, labelEnd: 0 },
+        R31: { top: 1, bottom: 2, labelEnd: 0 }
+      }
+    }
+    const s = useSessionStore()
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    await s.reloadAlignConfig()
+    await s.runTemplateCheck()
+    await s.clearHeaderRanges(['R06', 'NR06'])
+    expect(setCalls).toHaveLength(1)
+    expect(setCalls[0].headerRanges).toEqual({ R31: { top: 1, bottom: 2, labelEnd: 0 } })
+    // 清完立即复用了新配置重新核对
+    expect(lastRequest.headerRanges).toEqual({ R31: { top: 1, bottom: 2, labelEnd: 0 } })
+  })
+
+  it('reseedRuleTable 无结果返回 false；重新解析后按新种子重建并返回 true', async () => {
+    const s = useSessionStore()
+    expect(s.reseedRuleTable()).toBe(false)
+
+    s.templateLeft = [wb('L', 'R06.xls')]
+    s.templateRight = [wb('R', 'NR06.xls')]
+    await s.runTemplateCheck()
+    s.initRuleDraft()
+    expect(s.activeRuleDraft?.left['5,3']).toBe('甲_乙')
+
+    // 模拟改锚点后重新解析出了不同的标签/位置
+    const moved: TemplateSheet = {
+      ...seedSheet('R06', 'R06.xls', 'L'),
+      cells: [{ ...seedCell(), row: 6, col: 4, rowPath: '丙', colPath: '丁', seed: '丙_丁' }]
+    }
+    const movedRight: TemplateSheet = {
+      ...seedSheet('NR06', 'NR06.xls', 'R'),
+      cells: [{ ...seedCell(), row: 6, col: 4, rowPath: '丙', colPath: '丁', seed: '丙_丁' }]
+    }
+    stubPairs = [{ ...pairResult('6', 'R06', 'NR06'), left: moved, right: movedRight }]
+    await s.runTemplateCheck()
+    expect(s.reseedRuleTable()).toBe(true)
+    expect(s.activeRuleDraft?.left['6,4']).toBe('丙_丁')
+    expect(s.activeRuleDraft?.left['5,3']).toBeUndefined()
+  })
+})

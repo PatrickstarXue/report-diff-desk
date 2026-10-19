@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { TemplateSheet } from '@shared/types'
 import { useSessionStore } from '../stores/session'
 import { useGridZoom } from '../utils/zoom'
 import RuleTable from './RuleTable.vue'
@@ -90,23 +91,47 @@ async function save(): Promise<void> {
 
 /**
  * 以锚点自动填充：先用**当前填写的锚点词**重新解析两侧报表，再按新解析出的标签重建规则表。
- * 不重新解析的话，刚改的锚点词（还没点「开始核对」）根本不会生效。
+ * 手工表头范围优先级高于锚点——存在时必须先清掉，否则改锚点词、点按钮不会有任何变化。
  */
 async function reseed(): Promise<void> {
+  if (!pair.value) {
+    ElMessage.warning('当前没有核对结果，无法自动填充')
+    return
+  }
   const words = session.effectiveAnchors.join('、')
+  const manual = session.activePairManualHeaderKeys
+  const msg = manual.length
+    ? `当前表对已手动设置表头范围（${manual.join('、')}），锚点词对它不会生效。继续将清除这些手工范围，改按锚点词「${words}」重新自动识别并生成规则表（丢弃人工修改与存档值）。继续？`
+    : `将按当前锚点词「${words}」重新解析两侧报表，并按解析出的标签重新生成规则表（丢弃人工修改与存档值）。继续？`
   try {
-    await ElMessageBox.confirm(
-      `将按当前锚点词「${words}」重新解析两侧报表，并按解析出的标签重新生成规则表（丢弃人工修改与存档值）。继续？`,
-      '确认',
-      { type: 'warning' }
-    )
+    await ElMessageBox.confirm(msg, '确认', { type: 'warning' })
   } catch {
     return
   }
   try {
-    await session.runTemplateCheck()
-    session.reseedRuleTable()
-    ElMessage.success('已按当前锚点词重新解析并填充')
+    // 清手工范围的动作内部已重新核对；没有手工范围则显式核对一次
+    if (manual.length) await session.clearHeaderRanges(manual)
+    else await session.runTemplateCheck()
+    if (!session.reseedRuleTable()) {
+      ElMessage.warning('没有可用的核对结果，规则表未重建')
+      return
+    }
+    const now = pair.value
+    const label = (t?: TemplateSheet | null): string => {
+      if (!t) return '未解析'
+      if (t.degraded) return '未命中锚点（已按行列位置降级）'
+      if (t.anchor) return `命中「${t.anchor.word}」`
+      return '沿用人工表头范围'
+    }
+    const left = label(now?.left)
+    const right = label(now?.right)
+    if (now?.left?.degraded || now?.right?.degraded) {
+      ElMessage.warning(
+        `已重新填充：左侧${left}，右侧${right}。请把锚点词改成表头标签区最右列的原文后重试`
+      )
+    } else {
+      ElMessage.success(`已按锚点重新填充：左侧${left}，右侧${right}`)
+    }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err))
   }
@@ -142,6 +167,7 @@ async function restoreSaved(): Promise<void> {
           <strong>行规则值_列规则值</strong>，行首/列首的「批量」只改各自那一半。改动即时生效，点「保存规则」持久化。
           <br />
           灰底格 = 当前解析没产出这一格（多半是锚点词不对、解析降级了），<strong>不参与比对，也不会标绿</strong>；把锚点词改对再核对即可。
+          <strong>已手动设置表头范围时锚点不生效</strong>，点「以锚点自动填充」会提示清除后再重解析。
         </span>
         <span v-if="session.ruleDirty" class="dirty">有未保存的修改</span>
         <el-button size="small" type="primary" @click="save">保存规则</el-button>
