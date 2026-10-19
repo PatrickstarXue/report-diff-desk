@@ -154,6 +154,35 @@ async function restoreSaved(): Promise<void> {
   }
   ElMessage.success('已恢复存档的规则表')
 }
+
+/**
+ * 删除只读预览里选中的存档规则表。
+ * 没上传报表时没有「表对」下拉框，这里是唯一的删除入口——直接按存档键删，
+ * 不需要核对结果参与（deleteRuleTable 在没有报表时不会触发重新核对）。
+ */
+async function deletePreview(): Promise<void> {
+  const key = previewKey.value
+  if (!key) return
+  const name = key.split('|').join(' ↔ ')
+  try {
+    await ElMessageBox.confirm(
+      `将删除表样「${name}」已保存的规则表，人工对齐与存档值一并丢弃，删除后无法恢复。继续？`,
+      '删除存档规则',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    if (!(await session.deleteRuleTable(key))) {
+      ElMessage.info('这条存档已经不存在')
+      return
+    }
+    ElMessage.success('已删除该存档规则')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+  }
+}
 </script>
 
 <template>
@@ -199,11 +228,13 @@ async function restoreSaved(): Promise<void> {
     <template v-else-if="savedKeys.length">
       <div class="rule-toolbar">
         <span class="hint">
-          以下是<strong>已保存</strong>的规则表（只读）。上传两侧报表并核对后即可编辑。
+          以下是<strong>已保存</strong>的规则表（只读）。上传两侧报表并核对后即可编辑；不再需要的存档可直接点右侧「删除存档规则」。
         </span>
         <el-select v-model="previewKey" size="small" class="preview-select">
           <el-option v-for="k in savedKeys" :key="k" :label="k" :value="k" />
         </el-select>
+        <!-- 没上传报表时也要能删：这是当时唯一能操作存档的入口 -->
+        <el-button size="small" type="danger" plain @click="deletePreview">删除存档规则</el-button>
       </div>
       <div v-if="preview" class="rule-tables" :style="{ zoom: zoomScale }">
         <RuleTable

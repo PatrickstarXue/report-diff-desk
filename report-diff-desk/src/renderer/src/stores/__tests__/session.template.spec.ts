@@ -433,6 +433,20 @@ describe('删除存档规则', () => {
     expect(setCalls).toHaveLength(writes)
   })
 
+  it('没有上传报表（无核对结果）时也能按存档键删除，且不触发核对', async () => {
+    storedConfig = {
+      version: 2,
+      ruleTables: { 'R06|NR06': { left: { '5,3': 'a' }, right: { '5,3': 'a' } } }
+    }
+    const s = useSessionStore()
+    await s.reloadAlignConfig()
+    // 没有 templateLeft/templateRight，也没有 templateResult——只读预览页的删除入口
+    await expect(s.deleteRuleTable('R06|NR06')).resolves.toBe(true)
+    expect(storedConfig.ruleTables).toEqual({})
+    // 核对直接提前返回，不会发请求
+    expect(lastRequest).toEqual({})
+  })
+
   it('只删指定表对，其它表对的存档原样保留', async () => {
     storedConfig = {
       version: 2,
