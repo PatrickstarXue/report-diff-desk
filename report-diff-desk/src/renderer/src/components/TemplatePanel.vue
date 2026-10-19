@@ -135,7 +135,16 @@ const pairOptions = computed(() =>
  * 删除某个表对已存档的规则表（下拉框里的垃圾桶）。
  * 只删存档与内存草稿，不动报表文件本身；删完重新核对，该表对回到解析种子。
  */
-async function onDeleteSavedRule(o: { key: string; label: string }): Promise<void> {
+async function onDeleteSavedRule(o: {
+  key: string
+  label: string
+  hasSavedRule: boolean
+}): Promise<void> {
+  // 没有存档时按钮仍显示（灰态），点击只解释原因，避免「这里有按钮但没反应」
+  if (!o.hasSavedRule) {
+    ElMessage.info('该表对还没有保存过规则，无需删除')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `将删除表对「${o.label}」已保存的规则表（人工对齐与存档值一并丢弃），删除后按当前解析结果重新生成。继续？`,
@@ -395,11 +404,12 @@ async function resetRange(): Promise<void> {
           <el-option v-for="o in pairOptions" :key="o.index" :label="o.label" :value="o.index">
             <span class="pair-option">
               <span class="pair-option-label" :title="o.label">{{ o.label }}</span>
-              <!-- 该表对存过规则表才出现垃圾桶；stop 掉点击，避免顺带选中这一项 -->
+              <!-- 每项都显示垃圾桶：有存档为可点状态，没有存档则是灰态（点击只提示原因）。
+                   之前「有存档才渲染」会让没存过的表对看起来像按钮丢了，分不清是缺功能还是缺数据 -->
               <span
-                v-if="o.hasSavedRule"
                 class="pair-option-del"
-                title="删除该表对的存档规则"
+                :class="{ 'is-empty': !o.hasSavedRule }"
+                :title="o.hasSavedRule ? '删除该表对的存档规则' : '该表对还没有存档规则'"
                 @click.stop.prevent="onDeleteSavedRule(o)"
                 @mousedown.stop.prevent
               >
@@ -679,7 +689,12 @@ async function resetRange(): Promise<void> {
   color: var(--el-text-color-placeholder);
   cursor: pointer;
 }
-.pair-option-del:hover {
+/* 没有存档的表对：图标淡出、不可点，但仍占位——用户能看出「这里能删，只是没东西可删」 */
+.pair-option-del.is-empty {
+  color: var(--el-text-color-disabled);
+  cursor: not-allowed;
+}
+.pair-option-del:not(.is-empty):hover {
   color: var(--el-color-danger);
 }
 /* 未配对指定表对：贴住「表对」那一行的右端 */
